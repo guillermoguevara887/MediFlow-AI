@@ -26,5 +26,3 @@ In many regions, emergency rooms are overwhelmed by non-critical cases. **MediFl
 3. Run `npm install` and `npm run dev`.
 4. Deploy to **Vercel** or **Railway** for production.
 
----
-*Developed for the **Imagine Cup 2026** by a solo innovator committed to technology for social good.*
