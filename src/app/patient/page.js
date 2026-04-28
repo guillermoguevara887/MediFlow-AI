@@ -76,14 +76,14 @@ export default function Home() {
         <div className="space-y-4 mt-6">
           <input
             value={nombre}
-            className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-4 bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="Patient Name (optional)"
             onChange={(e) => setNombre(e.target.value)}
           />
 
           <textarea
             value={sintomas}
-            className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl h-40 focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full p-4 bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="Describe symptoms in detail..."
             onChange={(e) => setSintomas(e.target.value)}
           />
@@ -104,7 +104,7 @@ export default function Home() {
 
         {/* ERROR */}
         {errorMsg && (
-          <div className="mt-6 p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm">
+          <div className="mt-6 p-4 rounded-2xl bg-slate-50 border  text-slate-900 border-slate-200 text-sm">
             <div className="font-bold mb-1">Couldn’t complete the request</div>
             <div className="opacity-90">{errorMsg}</div>
           </div>
