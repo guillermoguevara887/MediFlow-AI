@@ -69,14 +69,8 @@ export default function Home() {
           AI-powered hospital triage & load prediction system
         </p>
 
-        <p className="text-slate-500 text-center mt-3 text-sm">
-          Helping hospitals reduce overcrowding using real-time patient data
-        </p>
 
-        <p className="text-slate-400 text-center mt-4 text-xs leading-relaxed">
-          Emergency rooms are overwhelmed. MediFlow AI helps prioritize patients
-          and anticipate demand before saturation happens.
-        </p>
+
 
         {/* FORM */}
         <div className="space-y-4 mt-6">
