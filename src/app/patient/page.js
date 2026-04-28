@@ -98,8 +98,8 @@ export default function Home() {
             onClick={analizarTriage}
             disabled={cargando}
             className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg transition-all ${cargando
-                ? "bg-slate-400"
-                : "bg-blue-600 hover:bg-blue-700 active:scale-95"
+              ? "bg-slate-400"
+              : "bg-blue-600 hover:bg-blue-700 active:scale-95"
               }`}
           >
             {cargando
@@ -167,22 +167,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* NUEVA SECCIÓN: LIVE INSIGHTS */}
-        <div className="mt-8 p-4 rounded-2xl bg-slate-50 border border-slate-200">
-          <h3 className="text-sm font-bold text-slate-700 mb-2">
-            Live System Insights (Demo)
-          </h3>
 
-          <div className="text-xs text-slate-600 space-y-1">
-            <div>Patients analyzed today: 43</div>
-            <div>RED cases: 12%</div>
-            <div>YELLOW cases: 38%</div>
-            <div>GREEN cases: 50%</div>
-            <div className="mt-2 font-semibold text-slate-700">
-              Peak demand detected: 6–8 PM
-            </div>
-          </div>
-        </div>
 
       </div>
 
