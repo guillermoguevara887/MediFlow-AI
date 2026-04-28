@@ -63,7 +63,10 @@ export default function Home() {
           MediFlow AI
         </h1>
         <p className="text-slate-500 text-center mb-8 text-sm uppercase tracking-widest font-bold">
-          Smart Triage System
+          AI-powered hospital triage & load prediction system
+        </p>
+        <p className="text-slate-500 text-center mb-8 text-sm uppercase tracking-widest font-bold">
+          Helping hospitals reduce overcrowding using real-time patient data
         </p>
 
         <div className="space-y-4">
