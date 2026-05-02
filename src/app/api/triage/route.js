@@ -1,140 +1,212 @@
 import { NextResponse } from "next/server";
+import { supabase } from "../../../lib/supabase";
 
-// ---- Config ----
 const API_VERSION = "2024-02-15-preview";
 
-// Hard rule: if any red flag appears, return RED immediately (no LLM needed)
+// ---- RED FLAGS ----
 const RED_FLAGS = [
-  { key: "chest pain", re: /\b(chest pain|chest pressure|tightness in (my )?chest)\b/i },
-  { key: "trouble breathing", re: /\b(shortness of breath|trouble breathing|can't breathe|cannot breathe|difficulty breathing)\b/i },
-  { key: "loss of consciousness", re: /\b(fainted|fainting|unconscious|passed out|loss of consciousness)\b/i },
-  { key: "seizure", re: /\b(seizure|convulsion)\b/i },
-  { key: "stroke signs", re: /\b(face droop|slurred speech|one[- ]sided weakness|weakness on one side|stroke)\b/i },
-  { key: "uncontrolled bleeding", re: /\b(heavy bleeding|bleeding won't stop|cannot stop bleeding|bleeding won'?t stop)\b/i },
-  { key: "severe allergic reaction", re: /\b(anaphylaxis|throat closing|swelling of (my )?(face|lips|tongue)|severe allergic reaction)\b/i },
-  { key: "severe head injury", re: /\b(severe head injury|hit my head and (i am|i'm) confused|head trauma)\b/i },
-  { key: "severe confusion", re: /\b(confused|disoriented|not making sense)\b/i },
-  { key: "suicidal intent", re: /\b(suicidal|kill myself|end my life)\b/i },
+  {
+    key: "chest pain",
+    re: /\b(chest pain|chest pressure|tightness in (my )?chest)\b/i,
+  },
+  {
+    key: "trouble breathing",
+    re: /\b(shortness of breath|trouble breathing|can't breathe|cannot breathe|difficulty breathing)\b/i,
+  },
 ];
 
+// ---- PROMPT ----
 const SYSTEM_PROMPT = `
-You are MediFlow AI, an administrative triage assistant for emergency-intake routing in emerging markets.
-You do NOT provide medical diagnosis or treatment. You ONLY output an administrative urgency level for intake prioritization.
+You are MediFlow AI, an administrative triage assistant.
 
-TASK:
-Given a patient's symptom text, return a JSON object with:
-- "color": one of "RED", "YELLOW", "GREEN"
-- "mensaje": a short, calm explanation in English (1–2 sentences)
-- "reasons": an array of 2–4 short bullet reasons (strings)
-- "red_flags_detected": an array of red-flag keywords you detected (strings). Empty if none.
+IMPORTANT:
+- ALWAYS respond in English.
+- Do NOT use Spanish.
+- Do NOT detect or switch language.
+- Return ONLY valid JSON.
+- Do NOT use markdown.
+- Do NOT wrap arrays in quotes.
+- "reasons" MUST be a JSON array, not a string.
+- "red_flags_detected" MUST be a JSON array, not a string.
 
-STRICT RULES:
-1) Output MUST be valid JSON with double quotes. No markdown. No extra text.
-2) RED is ONLY for clear red-flag symptoms suggesting immediate danger (e.g., chest pain/pressure, severe breathing trouble, fainting, seizure, stroke signs, heavy uncontrolled bleeding, severe allergic reaction with breathing/swelling, severe confusion).
-3) If there are NO red flags, do NOT return RED.
-4) YELLOW is for moderate symptoms that should be evaluated soon but are not clearly life-threatening:
-   fever, sore throat, moderate pain, vomiting/diarrhea without severe dehydration, minor injuries with persistent pain, symptoms lasting multiple days, or worsening symptoms.
-5) GREEN is for mild, common, self-limited symptoms with no red flags:
-   mild cold/runny nose, mild sore throat WITHOUT breathing issues, mild headache, mild cough, etc.
-6) If the text is too vague, default to YELLOW (safer than GREEN).
+Return ONLY valid JSON with this exact structure:
+{
+  "color": "RED" | "YELLOW" | "GREEN",
+  "mensaje": string,
+  "reasons": string[],
+  "red_flags_detected": string[]
+}
 
-OUTPUT FORMAT EXAMPLE:
-{"color":"YELLOW","mensaje":"Based on the symptoms, this needs a timely check but does not show clear emergency red flags.","reasons":["Detected: fever and sore throat","No red-flag signs like trouble breathing or chest pain mentioned"],"red_flags_detected":[]}
+Rules:
+- RED only if clear emergency.
+- No red flags → never RED.
+- If unsure → YELLOW.
+- This is not a diagnosis.
+- Keep "mensaje" short, clear, and patient-facing.
 `.trim();
 
-// ---- Helpers ----
+// ---- HELPERS ----
 function normalizeEndpoint(raw) {
   if (!raw) return null;
-  // Ensure trailing slash
   return raw.endsWith("/") ? raw : `${raw}/`;
 }
 
 function safeJsonFromModel(text) {
-  if (!text || typeof text !== "string") return null;
-
-  // Remove fenced blocks if any
-  const cleaned = text
-    .replace(/```json/gi, "")
-    .replace(/```/g, "")
-    .trim();
-
-  // Attempt to extract JSON object if extra text slipped in
-  const start = cleaned.indexOf("{");
-  const end = cleaned.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-
-  const jsonStr = cleaned.slice(start, end + 1);
   try {
-    return JSON.parse(jsonStr);
-  } catch {
+    if (!text) return null;
+
+    const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+
+    if (start === -1 || end === -1) return null;
+
+    return JSON.parse(cleaned.slice(start, end + 1));
+  } catch (err) {
+    console.error("JSON PARSE ERROR:", err);
     return null;
   }
 }
 
-function isValidColor(c) {
-  return c === "RED" || c === "YELLOW" || c === "GREEN";
+function ensureArray(value) {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) return parsed;
+
+      if (typeof parsed === "string") {
+        const secondParsed = JSON.parse(parsed);
+        return Array.isArray(secondParsed) ? secondParsed : [];
+      }
+
+      return [];
+    } catch (err) {
+      console.error("ARRAY PARSE ERROR:", err);
+      return [];
+    }
+  }
+
+  return [];
 }
 
-function fallbackYellow(message = "We could not confidently classify this input. Please ask a staff member to review.") {
+function normalizeColor(color) {
+  const value = String(color || "YELLOW").toUpperCase();
+
+  if (["RED", "YELLOW", "GREEN"].includes(value)) {
+    return value;
+  }
+
+  return "YELLOW";
+}
+
+function fallbackYellow(msg) {
   return {
     color: "YELLOW",
-    mensaje: message,
-    reasons: ["Classification fallback triggered", "Human review recommended"],
+    mensaje: msg,
+    reasons: ["Fallback triggered"],
     red_flags_detected: [],
   };
 }
 
-function immediateRedResponse(detectedKeys) {
+function immediateRedResponse(keys) {
   return {
     color: "RED",
-    mensaje: "Your symptoms include potential emergency warning signs. Please seek immediate medical attention or alert staff now.",
-    reasons: [
-      `Red-flag indicators detected: ${detectedKeys.join(", ")}`,
-      "This is an administrative urgency alert, not a diagnosis",
-    ],
-    red_flags_detected: detectedKeys,
+    mensaje: "Emergency warning signs detected. Seek immediate care.",
+    reasons: [`Detected: ${keys.join(", ")}`],
+    red_flags_detected: keys,
   };
 }
 
-// ---- Route ----
+async function saveTriageRecord({ nombre, sintomas, result }) {
+  const { error } = await supabase.from("triage_records").insert([
+    {
+      nombre: nombre || null,
+      sintomas,
+      color: result.color,
+      mensaje: result.mensaje,
+      reasons: result.reasons,
+      red_flags: result.red_flags_detected,
+    },
+  ]);
+
+  if (error) {
+    console.error("SUPABASE INSERT ERROR:", error);
+    return error;
+  }
+
+  console.log("DB INSERT OK");
+  return null;
+}
+
+// ---- ROUTE ----
 export async function POST(req) {
   try {
+    console.log("---- NEW REQUEST ----");
+
     const body = await req.json().catch(() => ({}));
-    const sintomas = (body?.sintomas ?? "").toString().trim();
+    const sintomas = (body?.sintomas ?? "").trim();
+    const nombre = (body?.nombre ?? "").trim();
 
     if (!sintomas) {
       return NextResponse.json(
-        fallbackYellow("Please enter symptoms to continue."),
+        fallbackYellow("Please enter symptoms."),
         { status: 400 }
       );
     }
 
-    // Basic length guard (prevents huge prompts)
     const sintomasLimited = sintomas.slice(0, 1200);
 
-    // 1) Hard red-flag check (deterministic and defendible)
+    console.log("INPUT:", sintomasLimited);
+
+    // 🔴 RED FLAGS LOCAL CHECK
     const detected = [];
+
     for (const rf of RED_FLAGS) {
-      if (rf.re.test(sintomasLimited)) detected.push(rf.key);
-    }
-    if (detected.length > 0) {
-      return NextResponse.json(immediateRedResponse(detected));
+      if (rf.re.test(sintomasLimited)) {
+        detected.push(rf.key);
+      }
     }
 
-    // 2) Call Azure OpenAI for YELLOW vs GREEN classification (bounded by rules)
+    if (detected.length > 0) {
+      const result = immediateRedResponse(detected);
+
+      const insertError = await saveTriageRecord({
+        nombre,
+        sintomas: sintomasLimited,
+        result,
+      });
+
+      if (insertError) {
+        return NextResponse.json(
+          {
+            error: "Database insert failed",
+            details: insertError.message,
+          },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json(result);
+    }
+
+    // 🧠 AZURE CONFIG
     const endpoint = normalizeEndpoint(process.env.AZURE_OPENAI_ENDPOINT);
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
     const apiKey = process.env.AZURE_OPENAI_KEY;
 
     if (!endpoint || !deployment || !apiKey) {
+      console.error("MISSING ENV VARIABLES");
+
       return NextResponse.json(
-        fallbackYellow("Server configuration is missing Azure OpenAI environment variables."),
+        fallbackYellow("Server configuration error."),
         { status: 500 }
       );
     }
 
-    const azureUrl =
-      `${endpoint}openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION}`;
+    const azureUrl = `${endpoint}openai/deployments/${deployment}/chat/completions?api-version=${API_VERSION}`;
 
     const response = await fetch(azureUrl, {
       method: "POST",
@@ -144,8 +216,6 @@ export async function POST(req) {
       },
       body: JSON.stringify({
         temperature: 0,
-        top_p: 1,
-        max_tokens: 220,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: sintomasLimited },
@@ -154,49 +224,63 @@ export async function POST(req) {
     });
 
     if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error("Azure OpenAI error:", response.status, errText);
+      const errorText = await response.text();
+      console.error("AZURE ERROR:", errorText);
+
       return NextResponse.json(
-        fallbackYellow("The system could not reach the AI service. Please ask a staff member to review."),
-        { status: 502 }
+        fallbackYellow("AI service error."),
+        { status: 500 }
       );
     }
 
     const data = await response.json();
-
     const content = data?.choices?.[0]?.message?.content ?? "";
+
     const parsed = safeJsonFromModel(content);
 
-    if (!parsed || !isValidColor(parsed.color) || typeof parsed.mensaje !== "string") {
-      console.error("Invalid model JSON:", content);
+    if (!parsed) {
+      console.error("INVALID AI RAW CONTENT:", content);
+
       return NextResponse.json(
-        fallbackYellow("The system could not produce a valid classification. Please ask a staff member to review."),
-        { status: 502 }
+        fallbackYellow("Invalid AI response."),
+        { status: 500 }
       );
     }
 
-    // Ensure required keys exist (keep your UI stable)
+    console.log("RAW parsed.reasons:", parsed.reasons);
+    console.log("TYPE parsed.reasons:", typeof parsed.reasons);
+
     const result = {
-      color: parsed.color,
-      mensaje: parsed.mensaje,
-      reasons: Array.isArray(parsed.reasons) ? parsed.reasons : [],
-      red_flags_detected: Array.isArray(parsed.red_flags_detected) ? parsed.red_flags_detected : [],
+      color: normalizeColor(parsed.color),
+      mensaje:
+        parsed.mensaje ||
+        "Please monitor your symptoms and seek medical care if they worsen.",
+      reasons: ensureArray(parsed.reasons),
+      red_flags_detected: ensureArray(parsed.red_flags_detected),
     };
 
-    // Safety: If model ever returns RED without red_flags_detected, downgrade to YELLOW
-    if (result.color === "RED" && (!result.red_flags_detected || result.red_flags_detected.length === 0)) {
-      result.color = "YELLOW";
-      result.reasons = [
-        ...(result.reasons || []),
-        "No explicit red-flag indicators detected; downgraded to YELLOW for safety consistency.",
-      ];
+    const insertError = await saveTriageRecord({
+      nombre,
+      sintomas: sintomasLimited,
+      result,
+    });
+
+    if (insertError) {
+      return NextResponse.json(
+        {
+          error: "Database insert failed",
+          details: insertError.message,
+        },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error("DEBUG (route error):", error);
+    console.error("FINAL ERROR:", error);
+
     return NextResponse.json(
-      fallbackYellow("System error. Please ask a staff member to review."),
+      fallbackYellow("System error."),
       { status: 500 }
     );
   }

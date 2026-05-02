@@ -25,7 +25,10 @@ export default function Home() {
       const res = await fetch("/api/triage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nombre: nombre.trim(), sintomas: sintomasTrim }),
+        body: JSON.stringify({
+          nombre: nombre.trim(),
+          sintomas: sintomasTrim,
+        }),
       });
 
       const data = await res.json().catch(() => null);
@@ -34,7 +37,7 @@ export default function Home() {
         const msg =
           data?.mensaje ||
           data?.error ||
-          "Request failed. Please try again or ask staff to review.";
+          "Request failed. Please try again.";
         setErrorMsg(msg);
         setResultado(null);
         return;
@@ -43,16 +46,19 @@ export default function Home() {
       setResultado(data);
     } catch (error) {
       console.error("Error calling API:", error);
-      setErrorMsg("Network error calling the triage API. Please try again.");
+      setErrorMsg("Network error calling the triage API.");
     } finally {
       setCargando(false);
     }
   };
 
+  // 🔥 FIX COLOR
+  const color = resultado?.color?.toUpperCase();
+
   const colorClass =
-    resultado?.color === "RED"
+    color === "RED"
       ? "bg-red-600 text-white"
-      : resultado?.color === "YELLOW"
+      : color === "YELLOW"
         ? "bg-amber-400 text-slate-900"
         : "bg-emerald-500 text-white";
 
@@ -69,31 +75,28 @@ export default function Home() {
           AI-powered hospital triage & load prediction system
         </p>
 
-
-
-
         {/* FORM */}
         <div className="space-y-4 mt-6">
           <input
             value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
             className="w-full p-4 bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
             placeholder="Patient Name (optional)"
-            onChange={(e) => setNombre(e.target.value)}
           />
 
           <textarea
             value={sintomas}
-            className="w-full p-4 bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none"
-            placeholder="Describe symptoms in detail..."
             onChange={(e) => setSintomas(e.target.value)}
+            className="w-full p-4 bg-slate-50 text-slate-900 border border-slate-200 rounded-2xl h-40 focus:ring-2 focus:ring-blue-500 outline-none"
+            placeholder="Describe symptoms in detail..."
           />
 
           <button
             onClick={analizarTriage}
             disabled={cargando}
             className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg transition-all ${cargando
-              ? "bg-slate-400"
-              : "bg-blue-600 hover:bg-blue-700 active:scale-95"
+                ? "bg-slate-400"
+                : "bg-blue-600 hover:bg-blue-700 active:scale-95"
               }`}
           >
             {cargando
@@ -104,47 +107,41 @@ export default function Home() {
 
         {/* ERROR */}
         {errorMsg && (
-          <div className="mt-6 p-4 rounded-2xl bg-slate-50 border  text-slate-900 border-slate-200 text-sm">
-            <div className="font-bold mb-1">Couldn’t complete the request</div>
-            <div className="opacity-90">{errorMsg}</div>
+          <div className="mt-6 p-4 rounded-2xl bg-slate-50 border text-slate-900 border-slate-200 text-sm">
+            <div className="font-bold mb-1">Error</div>
+            <div>{errorMsg}</div>
           </div>
         )}
 
         {/* RESULTADO */}
         {resultado && (
-          <div
-            className={`mt-8 p-6 rounded-2xl text-center animate-in fade-in slide-in-from-bottom-4 ${colorClass}`}
-          >
-            <h2 className="text-2xl font-black">
-              {resultado.color}
-            </h2>
+          <div className={`mt-8 p-6 rounded-2xl text-center ${colorClass}`}>
+            <h2 className="text-2xl font-black">{color}</h2>
 
-            <p className="mt-2 text-sm">
-              {resultado.mensaje}
-            </p>
+            <p className="mt-2 text-sm">{resultado.mensaje}</p>
 
-            {/* Explainability */}
-            {Array.isArray(resultado.reasons) && resultado.reasons.length > 0 && (
+            {/* Reasons */}
+            {resultado.reasons?.length > 0 && (
               <div className="mt-4 text-left">
                 <div className="text-xs font-bold uppercase">Why?</div>
                 <ul className="mt-2 text-sm list-disc list-inside">
-                  {resultado.reasons.slice(0, 4).map((r, idx) => (
-                    <li key={idx}>{r}</li>
+                  {resultado.reasons.map((r, i) => (
+                    <li key={i}>{r}</li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {/* Red flags */}
+            {/* Red Flags */}
             {resultado.red_flags_detected?.length > 0 && (
               <div className="mt-4 text-left">
                 <div className="text-xs font-bold uppercase">
                   Red flags detected
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {resultado.red_flags_detected.map((rf, idx) => (
+                  {resultado.red_flags_detected.map((rf, i) => (
                     <span
-                      key={idx}
+                      key={i}
                       className="px-3 py-1 text-xs font-bold bg-black/20 rounded-full"
                     >
                       {rf}
@@ -154,22 +151,13 @@ export default function Home() {
               </div>
             )}
 
-            {/* NUEVO MENSAJE CLAVE */}
+            {/* MESSAGE */}
             <div className="mt-4 text-xs opacity-90">
               This case contributes to hospital load analysis
             </div>
           </div>
         )}
-
-
-
       </div>
-
-      {/* FOOTER */}
-      <p className="mt-8 text-slate-400 text-[10px] max-w-xs text-center">
-        This tool uses Azure AI Language and Azure AI Foundry for administrative triage.
-        It does not replace professional medical diagnosis.
-      </p>
     </main>
   );
 }
