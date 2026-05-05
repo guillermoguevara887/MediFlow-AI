@@ -38,7 +38,7 @@ export default function Home() {
 
           {/* HOSPITAL */}
           <button
-            onClick={() => router.push("/hospital")}
+            onClick={() => router.push("/dashboard")}
             className="w-full p-5 rounded-2xl bg-slate-800 text-white font-bold shadow-lg hover:bg-slate-900 transition-all active:scale-95"
           >
             Hospital Dashboard
