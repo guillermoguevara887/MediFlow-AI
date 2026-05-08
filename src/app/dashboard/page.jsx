@@ -6,7 +6,6 @@ import {
   getAnomalyInsights,
   getTopClinicalPattern,
 } from "@/lib/triage-analytics";
-import AlertsList from "@/components/dashboard/AlertsList";
 import AnomalyInsights from "@/components/dashboard/AnomalyInsights";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +19,73 @@ function formatShortDate(dateString) {
   }).format(new Date(dateString));
 }
 
+function formatFullDate(dateString) {
+  if (!dateString) return "No date available";
+
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(dateString));
+  } catch {
+    return "No date available";
+  }
+}
+
 function formatPercent(value) {
   if (!Number.isFinite(value)) return "0%";
   return `${value.toFixed(1)}%`;
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value;
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed) return [parsed];
+    } catch {
+      return value.trim() ? [value] : [];
+    }
+  }
+
+  if (value) return [value];
+
+  return [];
+}
+
+function getTriageMeta(colorValue) {
+  const color = normalizeColor(colorValue);
+
+  const meta = {
+    RED: {
+      label: "RED",
+      badge: "bg-red-600 text-white",
+      soft: "bg-red-50 text-red-700 border-red-200",
+      border: "hover:border-red-200",
+      dot: "bg-red-500",
+      title: "Immediate review",
+    },
+    YELLOW: {
+      label: "YELLOW",
+      badge: "bg-amber-400 text-slate-950",
+      soft: "bg-amber-50 text-amber-700 border-amber-200",
+      border: "hover:border-amber-200",
+      dot: "bg-amber-500",
+      title: "Same-day review",
+    },
+    GREEN: {
+      label: "GREEN",
+      badge: "bg-emerald-500 text-white",
+      soft: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      border: "hover:border-emerald-200",
+      dot: "bg-emerald-500",
+      title: "Routine pathway",
+    },
+  };
+
+  return meta[color] || meta.GREEN;
 }
 
 function StatCard({ title, value, description, color, footer, href }) {
@@ -96,6 +159,119 @@ function StatCard({ title, value, description, color, footer, href }) {
   );
 }
 
+function PatientCaseCard({ record, compact = false }) {
+  const meta = getTriageMeta(record.color);
+  const reasons = normalizeArray(record.reasons);
+  const redFlags = normalizeArray(record.red_flags || record.red_flags_detected);
+
+  return (
+    <Link
+      href={`/dashboard/patients/${record.id}`}
+      className={`block rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${meta.border} ${compact ? "p-4" : "p-5"
+        }`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="truncate text-base font-bold text-slate-900">
+              {record.nombre || "Unknown patient"}
+            </h3>
+
+            <span
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${meta.soft}`}
+            >
+              {meta.title}
+            </span>
+          </div>
+
+          <p className="mt-1 text-xs font-medium text-slate-400">
+            {formatFullDate(record.created_at)}
+          </p>
+        </div>
+
+        <span
+          className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${meta.badge}`}
+        >
+          {meta.label}
+        </span>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+          Symptoms
+        </p>
+
+        <p className="mt-2 max-h-16 overflow-hidden text-sm leading-6 text-slate-600">
+          {record.sintomas || "No symptoms provided"}
+        </p>
+      </div>
+
+      {!compact && (
+        <div className="mt-3 rounded-2xl border border-slate-100 bg-white p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
+            AI message
+          </p>
+
+          <p className="mt-2 max-h-14 overflow-hidden text-sm leading-6 text-slate-600">
+            {record.mensaje || "No triage message available"}
+          </p>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {redFlags.slice(0, 3).map((flag, index) => (
+          <span
+            key={index}
+            className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold text-white"
+          >
+            {flag}
+          </span>
+        ))}
+
+        {reasons.length > 0 && (
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-500">
+            {reasons.length} reason{reasons.length === 1 ? "" : "s"}
+          </span>
+        )}
+      </div>
+
+      <p className="mt-4 text-sm font-semibold text-blue-700">
+        Open patient case →
+      </p>
+    </Link>
+  );
+}
+
+function PatientCasesPanel({ title, description, records, emptyMessage }) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-900">{title}</h2>
+
+          <p className="mt-1 text-sm text-slate-500">{description}</p>
+        </div>
+
+        <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+          {records.length} shown
+        </span>
+      </div>
+
+      {records.length > 0 ? (
+        <div className="space-y-4">
+          {records.map((record) => (
+            <PatientCaseCard key={record.id} record={record} compact />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+          {emptyMessage}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function CasesChart({ data }) {
   const maxValue = Math.max(...data.map((item) => item.total), 1);
 
@@ -151,8 +327,7 @@ function CasesChart({ data }) {
                 <div
                   className="bg-red-500"
                   style={{
-                    height: `${item.total ? (item.red / item.total) * 100 : 0
-                      }%`,
+                    height: `${item.total ? (item.red / item.total) * 100 : 0}%`,
                   }}
                 />
 
@@ -352,6 +527,8 @@ export default async function DashboardPage() {
     .filter((record) => normalizeColor(record.color) === "RED")
     .slice(0, 5);
 
+  const latestPatientCases = allRecords.slice(0, 8);
+
   const chartData = getLastDaysData(allRecords, 14);
   const anomalyInsights = getAnomalyInsights(allRecords);
   const topClinicalPattern = getTopClinicalPattern(allRecords);
@@ -435,9 +612,11 @@ export default async function DashboardPage() {
         <section className="mb-8 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
           <CasesChart data={chartData} />
 
-          <AlertsList
-            alerts={criticalAlerts}
+          <PatientCasesPanel
             title="Latest critical alerts"
+            description="Newest RED triage cases. Click any patient to open the full case profile."
+            records={criticalAlerts}
+            emptyMessage="No RED critical alerts were found in the loaded records."
           />
         </section>
 
@@ -458,6 +637,40 @@ export default async function DashboardPage() {
           />
         </section>
 
+        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+            <div>
+              <h2 className="text-2xl font-semibold text-slate-900">
+                Recent patient cases
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Latest records from Supabase. Each card opens the individual
+                patient case screen.
+              </p>
+            </div>
+
+            <Link
+              href="/dashboard/records"
+              className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+            >
+              View all records →
+            </Link>
+          </div>
+
+          {latestPatientCases.length > 0 ? (
+            <div className="grid gap-4 lg:grid-cols-2">
+              {latestPatientCases.map((record) => (
+                <PatientCaseCard key={record.id} record={record} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+              No patient records were found.
+            </div>
+          )}
+        </section>
+
         <section className="grid gap-5 md:grid-cols-3">
           <QuickAccessCard
             title="Critical alerts"
@@ -474,10 +687,10 @@ export default async function DashboardPage() {
           />
 
           <QuickAccessCard
-            title="Recent records"
-            description="Open the patient records table with filters by triage level."
-            href="/dashboard/records"
-            badge="Patient data"
+            title="Patient intake"
+            description="Register a new patient case and send it into the hospital intelligence system."
+            href="/"
+            badge="New case"
           />
         </section>
       </div>
