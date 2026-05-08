@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { fetchAllTriageRecords } from "@/lib/triage-data";
 import { normalizeColor } from "@/lib/triage-analytics";
-import RecentRecordsTable from "@/components/dashboard/RecentRecordsTable";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +16,152 @@ function FilterButton({ href, active, children }) {
     >
       {children}
     </Link>
+  );
+}
+
+function formatDate(value) {
+  if (!value) return "No date";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "No date";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function getPatientName(record) {
+  return (
+    record?.nombre ||
+    record?.name ||
+    record?.patient_name ||
+    record?.patientName ||
+    "Unnamed patient"
+  );
+}
+
+function getSymptoms(record) {
+  return record?.sintomas || record?.symptoms || "No symptoms registered";
+}
+
+function getMessage(record) {
+  return record?.mensaje || record?.message || "No clinical message available.";
+}
+
+function getColorStyles(color) {
+  const normalized = normalizeColor(color);
+
+  if (normalized === "RED") {
+    return "border-red-200 bg-red-50 text-red-700";
+  }
+
+  if (normalized === "YELLOW") {
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+
+  if (normalized === "GREEN") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-700";
+}
+
+function ClickableRecordsList({ records }) {
+  if (!records || records.length === 0) {
+    return (
+      <section className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <h2 className="text-xl font-bold text-slate-900">No records found</h2>
+        <p className="mt-2 text-sm text-slate-500">
+          There are no records matching this filter.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-6 py-5">
+        <h2 className="text-xl font-bold text-slate-900">
+          Recent patient records
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Click any patient record to open the individual patient file.
+        </p>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {records.map((record) => {
+          const color = normalizeColor(record?.color);
+          const patientName = getPatientName(record);
+          const symptoms = getSymptoms(record);
+          const message = getMessage(record);
+          const createdAt = formatDate(record?.created_at);
+          const href = record?.id
+            ? `/dashboard/patients/${record.id}`
+            : "/dashboard/records";
+
+          return (
+            <Link
+              key={record?.id}
+              href={href}
+              prefetch={false}
+              className="group grid gap-4 px-6 py-5 transition hover:bg-blue-50/60 md:grid-cols-[1.2fr_1.6fr_0.8fr_0.8fr]"
+            >
+              <div>
+                <p className="text-sm font-medium text-slate-500">Patient</p>
+                <p className="mt-1 font-semibold text-slate-900 group-hover:text-blue-700">
+                  {patientName}
+                </p>
+
+                {!record?.id && (
+                  <p className="mt-1 text-xs font-medium text-red-600">
+                    Missing patient ID
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-slate-500">Symptoms</p>
+                <p className="mt-1 line-clamp-2 text-sm text-slate-700">
+                  {symptoms}
+                </p>
+                <p className="mt-2 line-clamp-1 text-xs text-slate-500">
+                  {message}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-slate-500">Severity</p>
+                <span
+                  className={`mt-2 inline-flex rounded-full border px-3 py-1 text-xs font-bold ${getColorStyles(
+                    color
+                  )}`}
+                >
+                  {color || "UNKNOWN"}
+                </span>
+              </div>
+
+              <div className="md:text-right">
+                <p className="text-sm font-medium text-slate-500">Created</p>
+                <p className="mt-1 text-sm font-semibold text-slate-700">
+                  {createdAt}
+                </p>
+                <p className="mt-2 text-xs font-semibold text-blue-700 opacity-0 transition group-hover:opacity-100">
+                  Open patient →
+                </p>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -191,7 +336,7 @@ export default async function RecentRecordsPage({ searchParams }) {
           </div>
         </section>
 
-        <RecentRecordsTable records={visibleRecords} />
+        <ClickableRecordsList records={visibleRecords} />
       </div>
     </main>
   );
