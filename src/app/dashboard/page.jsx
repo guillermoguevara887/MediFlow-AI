@@ -3,10 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+const supabaseKey =
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 function normalizeColor(color) {
   return String(color || "").toUpperCase();
@@ -23,13 +28,13 @@ function getPatientDisplayName(record, index = 0) {
     ? String(record.id).split("-")[0]
     : String(index + 1).padStart(4, "0");
 
-  return `Paciente #${shortId}`;
+  return `Patient #${shortId}`;
 }
 
 function formatDate(dateString) {
-  if (!dateString) return "Sin fecha";
+  if (!dateString) return "No date";
 
-  return new Intl.DateTimeFormat("es-ES", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -40,15 +45,30 @@ function formatDate(dateString) {
 function formatShortDate(dateString) {
   if (!dateString) return "";
 
-  return new Intl.DateTimeFormat("es-ES", {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
   }).format(new Date(dateString));
 }
 
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "0%";
+  return `${value.toFixed(1)}%`;
+}
+
 async function fetchAllTriageRecords() {
+  if (!supabase) {
+    return {
+      records: [],
+      error: {
+        message:
+          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_ANON_KEY.",
+      },
+    };
+  }
+
   const pageSize = 1000;
-  const maxRecords = 3000;
+  const maxRecords = 6000;
   let allRecords = [];
 
   for (let from = 0; from < maxRecords; from += pageSize) {
@@ -111,7 +131,203 @@ function getLastDaysData(records, days = 14) {
   return Array.from(map.values());
 }
 
-function StatCard({ title, value, description, color }) {
+function getDailyStats(records) {
+  const map = new Map();
+
+  records.forEach((record) => {
+    if (!record.created_at) return;
+
+    const key = new Date(record.created_at).toISOString().slice(0, 10);
+    const color = normalizeColor(record.color);
+    const text = [
+      record.sintomas,
+      record.mensaje,
+      Array.isArray(record.reasons) ? record.reasons.join(" ") : "",
+      Array.isArray(record.red_flags) ? record.red_flags.join(" ") : "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (!map.has(key)) {
+      map.set(key, {
+        day: key,
+        total: 0,
+        red: 0,
+        yellow: 0,
+        green: 0,
+        respiratory: 0,
+        gastro: 0,
+        heat: 0,
+      });
+    }
+
+    const item = map.get(key);
+
+    item.total += 1;
+
+    if (color === "RED") item.red += 1;
+    if (color === "YELLOW") item.yellow += 1;
+    if (color === "GREEN") item.green += 1;
+
+    if (
+      text.includes("cough") ||
+      text.includes("fever") ||
+      text.includes("breath") ||
+      text.includes("respiratory") ||
+      text.includes("sore throat")
+    ) {
+      item.respiratory += 1;
+    }
+
+    if (
+      text.includes("vomit") ||
+      text.includes("diarrhea") ||
+      text.includes("stomach") ||
+      text.includes("abdominal") ||
+      text.includes("gastro")
+    ) {
+      item.gastro += 1;
+    }
+
+    if (
+      text.includes("heat") ||
+      text.includes("thirst") ||
+      text.includes("dry skin") ||
+      text.includes("collapse")
+    ) {
+      item.heat += 1;
+    }
+  });
+
+  return Array.from(map.values()).sort(
+    (a, b) => new Date(a.day) - new Date(b.day)
+  );
+}
+
+function getAnomalyInsights(records) {
+  const dailyStats = getDailyStats(records);
+
+  if (dailyStats.length === 0) {
+    return [];
+  }
+
+  const averageVolume =
+    dailyStats.reduce((sum, item) => sum + item.total, 0) / dailyStats.length;
+
+  const averageRed =
+    dailyStats.reduce((sum, item) => sum + item.red, 0) / dailyStats.length;
+
+  const volumeInsights = dailyStats
+    .map((item) => {
+      const volumeRatio = averageVolume > 0 ? item.total / averageVolume : 0;
+      const redRatio = averageRed > 0 ? item.red / averageRed : 0;
+
+      const clusterCandidates = [
+        { label: "Respiratory cluster", value: item.respiratory },
+        { label: "Gastrointestinal cluster", value: item.gastro },
+        { label: "Heat-related cluster", value: item.heat },
+      ].sort((a, b) => b.value - a.value);
+
+      const topCluster = clusterCandidates[0];
+
+      return {
+        ...item,
+        volumeRatio,
+        redRatio,
+        topCluster,
+        score: volumeRatio + redRatio * 0.7 + topCluster.value / Math.max(item.total, 1),
+      };
+    })
+    .filter((item) => item.volumeRatio >= 1.45 || item.redRatio >= 1.45)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+
+  return volumeInsights;
+}
+
+function getTopClinicalPattern(records) {
+  const counts = {
+    respiratory: 0,
+    gastro: 0,
+    heat: 0,
+    cardiac: 0,
+    neurological: 0,
+  };
+
+  records.forEach((record) => {
+    const text = [
+      record.sintomas,
+      record.mensaje,
+      Array.isArray(record.reasons) ? record.reasons.join(" ") : "",
+      Array.isArray(record.red_flags) ? record.red_flags.join(" ") : "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (
+      text.includes("cough") ||
+      text.includes("fever") ||
+      text.includes("breath") ||
+      text.includes("respiratory") ||
+      text.includes("sore throat")
+    ) {
+      counts.respiratory += 1;
+    }
+
+    if (
+      text.includes("vomit") ||
+      text.includes("diarrhea") ||
+      text.includes("stomach") ||
+      text.includes("abdominal") ||
+      text.includes("gastro")
+    ) {
+      counts.gastro += 1;
+    }
+
+    if (
+      text.includes("heat") ||
+      text.includes("thirst") ||
+      text.includes("dry skin") ||
+      text.includes("collapse")
+    ) {
+      counts.heat += 1;
+    }
+
+    if (
+      text.includes("chest") ||
+      text.includes("cardiovascular") ||
+      text.includes("cold sweating")
+    ) {
+      counts.cardiac += 1;
+    }
+
+    if (
+      text.includes("weakness on one side") ||
+      text.includes("trouble speaking") ||
+      text.includes("neurological") ||
+      text.includes("stroke")
+    ) {
+      counts.neurological += 1;
+    }
+  });
+
+  const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+
+  const labels = {
+    respiratory: "Respiratory symptoms",
+    gastro: "Gastrointestinal symptoms",
+    heat: "Heat-related symptoms",
+    cardiac: "Cardiac warning signs",
+    neurological: "Neurological warning signs",
+  };
+
+  return {
+    label: labels[winner?.[0]] || "General triage symptoms",
+    count: winner?.[1] || 0,
+  };
+}
+
+function StatCard({ title, value, description, color, footer }) {
   const styles = {
     RED: {
       badge: "bg-red-50 text-red-700 border-red-200",
@@ -128,6 +344,10 @@ function StatCard({ title, value, description, color }) {
     BLUE: {
       badge: "bg-blue-50 text-blue-700 border-blue-200",
       dot: "bg-blue-500",
+    },
+    PURPLE: {
+      badge: "bg-violet-50 text-violet-700 border-violet-200",
+      dot: "bg-violet-500",
     },
   };
 
@@ -146,10 +366,14 @@ function StatCard({ title, value, description, color }) {
           <p className="mt-2 text-sm leading-6 text-slate-500">
             {description}
           </p>
+
+          {footer ? (
+            <p className="mt-4 text-xs font-medium text-slate-400">{footer}</p>
+          ) : null}
         </div>
 
         <div
-          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${current.badge}`}
+          className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${current.badge}`}
         >
           <span className={`h-2.5 w-2.5 rounded-full ${current.dot}`} />
           {color}
@@ -164,8 +388,8 @@ function FilterButton({ href, active, children }) {
     <Link
       href={href}
       className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${active
-          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+        ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+        : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
         }`}
     >
       {children}
@@ -181,10 +405,10 @@ function CasesChart({ data }) {
       <div className="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-start">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
-            Casos en el tiempo
+            Case volume over time
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Registros generados durante los últimos 14 días.
+            Triage records generated during the last 14 days.
           </p>
         </div>
 
@@ -220,7 +444,7 @@ function CasesChart({ data }) {
               <div
                 className="flex w-full flex-col justify-end overflow-hidden rounded-t-xl bg-slate-200"
                 style={{ height: `${height}%` }}
-                title={`${item.total} casos`}
+                title={`${item.total} cases`}
               >
                 <div
                   className="bg-red-500"
@@ -231,13 +455,15 @@ function CasesChart({ data }) {
                 <div
                   className="bg-amber-400"
                   style={{
-                    height: `${item.total ? (item.yellow / item.total) * 100 : 0}%`,
+                    height: `${item.total ? (item.yellow / item.total) * 100 : 0
+                      }%`,
                   }}
                 />
                 <div
                   className="bg-emerald-500"
                   style={{
-                    height: `${item.total ? (item.green / item.total) * 100 : 0}%`,
+                    height: `${item.total ? (item.green / item.total) * 100 : 0
+                      }%`,
                   }}
                 />
               </div>
@@ -259,21 +485,21 @@ function AlertsList({ alerts }) {
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
-            Alertas críticas
+            Critical alerts
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Casos RED recientes que requieren revisión inmediata.
+            Recent RED cases that require immediate clinical review.
           </p>
         </div>
 
         <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          EN VIVO
+          LIVE
         </span>
       </div>
 
       {alerts.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
-          No hay alertas críticas por el momento.
+          No critical alerts at the moment.
         </div>
       ) : (
         <div className="space-y-4">
@@ -289,12 +515,14 @@ function AlertsList({ alerts }) {
                   </h3>
 
                   <p className="mt-2 text-sm text-slate-600">
-                    <span className="font-medium text-slate-800">Síntomas:</span>{" "}
-                    {alert.sintomas || "No especificados"}
+                    <span className="font-medium text-slate-800">
+                      Symptoms:
+                    </span>{" "}
+                    {alert.sintomas || "Not specified"}
                   </p>
 
                   <p className="mt-2 text-sm text-slate-500">
-                    {alert.mensaje || "Sin mensaje disponible"}
+                    {alert.mensaje || "No message available"}
                   </p>
                 </div>
 
@@ -316,16 +544,148 @@ function AlertsList({ alerts }) {
   );
 }
 
+function AnomalyInsights({ insights }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div>
+          <div className="mb-2 inline-flex rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">
+            AI Monitoring Layer
+          </div>
+
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Anomaly insights
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Simulated operational signals based on case volume, RED cases, and
+            symptom clusters.
+          </p>
+        </div>
+      </div>
+
+      {insights.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
+          No abnormal patterns detected in the current dataset.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {insights.map((item) => (
+            <div
+              key={item.day}
+              className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-violet-700">
+                    {formatShortDate(item.day)}
+                  </p>
+
+                  <h3 className="mt-2 text-lg font-bold text-slate-900">
+                    Unusual case volume detected
+                  </h3>
+                </div>
+
+                <span className="rounded-full border border-violet-200 bg-white px-3 py-1 text-xs font-bold text-violet-700">
+                  {item.total} cases
+                </span>
+              </div>
+
+              <p className="mt-3 text-sm leading-6 text-slate-600">
+                Volume was approximately{" "}
+                <span className="font-semibold text-slate-900">
+                  {item.volumeRatio.toFixed(1)}x
+                </span>{" "}
+                above the baseline. Dominant signal:{" "}
+                <span className="font-semibold text-slate-900">
+                  {item.topCluster.label}
+                </span>
+                .
+              </p>
+
+              <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 font-semibold text-red-700">
+                  RED: {item.red}
+                </span>
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 font-semibold text-amber-700">
+                  YELLOW: {item.yellow}
+                </span>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                  GREEN: {item.green}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TriageDistribution({ total, redCount, yellowCount, greenCount }) {
+  return (
+    <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="text-2xl font-semibold text-slate-900">
+        Triage distribution
+      </h2>
+
+      <p className="mt-1 text-sm text-slate-500">
+        Current severity mix across all loaded records.
+      </p>
+
+      <div className="mt-6 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
+        <div className="flex h-5 w-full">
+          <div
+            className="bg-red-500"
+            style={{
+              width: `${total ? (redCount / total) * 100 : 0}%`,
+            }}
+          />
+          <div
+            className="bg-amber-400"
+            style={{
+              width: `${total ? (yellowCount / total) * 100 : 0}%`,
+            }}
+          />
+          <div
+            className="bg-emerald-500"
+            style={{
+              width: `${total ? (greenCount / total) * 100 : 0}%`,
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
+        <span>
+          <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-500" />
+          RED: {redCount}
+        </span>
+
+        <span>
+          <span className="mr-2 inline-block h-3 w-3 rounded-full bg-amber-400" />
+          YELLOW: {yellowCount}
+        </span>
+
+        <span>
+          <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-500" />
+          GREEN: {greenCount}
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function RecentRecordsTable({ records }) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">
-            Registros recientes
+            Recent records
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Últimos pacientes registrados en el sistema.
+            Latest patients registered in the triage system.
           </p>
         </div>
       </div>
@@ -334,10 +694,10 @@ function RecentRecordsTable({ records }) {
         <table className="w-full border-collapse text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3 font-semibold">Paciente</th>
-              <th className="px-4 py-3 font-semibold">Síntomas</th>
-              <th className="px-4 py-3 font-semibold">Color</th>
-              <th className="px-4 py-3 font-semibold">Fecha</th>
+              <th className="px-4 py-3 font-semibold">Patient</th>
+              <th className="px-4 py-3 font-semibold">Symptoms</th>
+              <th className="px-4 py-3 font-semibold">Triage level</th>
+              <th className="px-4 py-3 font-semibold">Time</th>
             </tr>
           </thead>
 
@@ -358,7 +718,7 @@ function RecentRecordsTable({ records }) {
                     {getPatientDisplayName(record, index)}
                   </td>
                   <td className="px-4 py-4 text-slate-600">
-                    {record.sintomas || "No especificados"}
+                    {record.sintomas || "Not specified"}
                   </td>
                   <td className="px-4 py-4">
                     <span
@@ -391,10 +751,10 @@ export default async function DashboardPage({ searchParams }) {
       <main className="min-h-screen bg-[#f4f7fb] px-6 py-10">
         <div className="mx-auto max-w-4xl rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-bold text-slate-900">
-            Error del dashboard
+            Dashboard error
           </h1>
           <p className="mt-3 text-red-600">
-            No se pudieron cargar los registros desde Supabase.
+            Records could not be loaded from Supabase.
           </p>
           <pre className="mt-4 overflow-auto rounded-2xl bg-slate-50 p-4 text-sm text-red-700">
             {JSON.stringify(error, null, 2)}
@@ -419,7 +779,9 @@ export default async function DashboardPage({ searchParams }) {
     (record) => normalizeColor(record.color) === "GREEN"
   ).length;
 
-  const redPercentage = total > 0 ? ((redCount / total) * 100).toFixed(1) : "0";
+  const redPercentage = total > 0 ? (redCount / total) * 100 : 0;
+  const yellowPercentage = total > 0 ? (yellowCount / total) * 100 : 0;
+  const greenPercentage = total > 0 ? (greenCount / total) * 100 : 0;
 
   const filteredRecords =
     selectedColor === "ALL"
@@ -433,8 +795,9 @@ export default async function DashboardPage({ searchParams }) {
     .slice(0, 5);
 
   const chartData = getLastDaysData(allRecords, 14);
-
   const recentRecords = filteredRecords.slice(0, 10);
+  const anomalyInsights = getAnomalyInsights(allRecords);
+  const topClinicalPattern = getTopClinicalPattern(allRecords);
 
   return (
     <main className="min-h-screen bg-[#f4f7fb] px-6 py-8 text-slate-900">
@@ -445,7 +808,7 @@ export default async function DashboardPage({ searchParams }) {
               href="/"
               className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
             >
-              ← Volver al inicio
+              ← Back to home
             </Link>
           </div>
 
@@ -456,88 +819,63 @@ export default async function DashboardPage({ searchParams }) {
               </div>
 
               <h1 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
-                Resumen de triaje en tiempo real
+                Real-time triage intelligence
               </h1>
 
               <p className="mt-3 max-w-3xl text-slate-600">
-                Monitoreo de registros de pacientes para identificar distribución
-                de severidad, casos críticos y comportamiento general del flujo
-                hospitalario.
+                Monitor patient intake, severity distribution, critical alerts,
+                and abnormal clinical patterns across the hospital triage flow.
               </p>
             </div>
 
             <div className="rounded-3xl border border-slate-200 bg-white px-6 py-5 text-right shadow-sm">
-              <p className="text-sm text-slate-500">Total de registros</p>
+              <p className="text-sm text-slate-500">Loaded records</p>
               <p className="mt-1 text-3xl font-bold text-slate-900">{total}</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Synthetic demo dataset
+              </p>
             </div>
           </div>
         </section>
 
         <section className="mb-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            title="Casos críticos"
+            title="Critical cases"
             value={redCount}
-            description={`${redPercentage}% del total de registros`}
+            description={`${formatPercent(
+              redPercentage
+            )} of all triage records`}
             color="RED"
+            footer="Immediate review recommended"
           />
 
           <StatCard
-            title="Casos moderados"
+            title="Moderate cases"
             value={yellowCount}
-            description="Pacientes que pueden requerir atención programada"
+            description={`${formatPercent(
+              yellowPercentage
+            )} may require same-day or scheduled care`}
             color="YELLOW"
+            footer="Clinical follow-up suggested"
           />
 
           <StatCard
-            title="Casos de bajo riesgo"
+            title="Low-risk cases"
             value={greenCount}
-            description="Pacientes aptos para orientación no urgente"
+            description={`${formatPercent(
+              greenPercentage
+            )} suitable for non-urgent guidance`}
             color="GREEN"
+            footer="Routine care pathway"
           />
 
           <StatCard
-            title="Estado del sistema"
-            value="Activo"
-            description="Validación sintética de triaje en ejecución"
-            color="BLUE"
+            title="Top pattern"
+            value={topClinicalPattern.count}
+            description={topClinicalPattern.label}
+            color="PURPLE"
+            footer="Derived from symptoms and red flags"
           />
-        </section>
-
-        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Filtrar registros
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Vista actual: {selectedColor === "ALL" ? "Todos" : selectedColor}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <FilterButton href="/dashboard" active={selectedColor === "ALL"}>
-                Todos
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=RED"
-                active={selectedColor === "RED"}
-              >
-                RED
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=YELLOW"
-                active={selectedColor === "YELLOW"}
-              >
-                YELLOW
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=GREEN"
-                active={selectedColor === "GREEN"}
-              >
-                GREEN
-              </FilterButton>
-            </div>
-          </div>
         </section>
 
         <section className="mb-8 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
@@ -545,53 +883,64 @@ export default async function DashboardPage({ searchParams }) {
           <AlertsList alerts={criticalAlerts} />
         </section>
 
-        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Distribución del triaje
-          </h2>
+        <section className="mb-8">
+          <AnomalyInsights insights={anomalyInsights} />
+        </section>
 
-          <p className="mt-1 text-sm text-slate-500">
-            Proporción actual de severidad sobre todos los registros cargados.
-          </p>
+        <TriageDistribution
+          total={total}
+          redCount={redCount}
+          yellowCount={yellowCount}
+          greenCount={greenCount}
+        />
 
-          <div className="mt-6 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
-            <div className="flex h-5 w-full">
-              <div
-                className="bg-red-500"
-                style={{
-                  width: `${total ? (redCount / total) * 100 : 0}%`,
-                }}
-              />
-              <div
-                className="bg-amber-400"
-                style={{
-                  width: `${total ? (yellowCount / total) * 100 : 0}%`,
-                }}
-              />
-              <div
-                className="bg-emerald-500"
-                style={{
-                  width: `${total ? (greenCount / total) * 100 : 0}%`,
-                }}
-              />
+        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Filter recent records
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Current table view:{" "}
+                {selectedColor === "ALL" ? "All records" : selectedColor} · Showing{" "}
+                <span className="font-semibold text-slate-700">
+                  {recentRecords.length}
+                </span>{" "}
+                of{" "}
+                <span className="font-semibold text-slate-700">
+                  {filteredRecords.length}
+                </span>{" "}
+                matching records
+              </p>
             </div>
-          </div>
 
-          <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-500" />
-              RED: {redCount}
-            </span>
+            <div className="flex flex-wrap gap-3">
+              <FilterButton href="/dashboard" active={selectedColor === "ALL"}>
+                All
+              </FilterButton>
 
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-amber-400" />
-              YELLOW: {yellowCount}
-            </span>
+              <FilterButton
+                href="/dashboard?color=RED"
+                active={selectedColor === "RED"}
+              >
+                RED
+              </FilterButton>
 
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-500" />
-              GREEN: {greenCount}
-            </span>
+              <FilterButton
+                href="/dashboard?color=YELLOW"
+                active={selectedColor === "YELLOW"}
+              >
+                YELLOW
+              </FilterButton>
+
+              <FilterButton
+                href="/dashboard?color=GREEN"
+                active={selectedColor === "GREEN"}
+              >
+                GREEN
+              </FilterButton>
+            </div>
           </div>
         </section>
 

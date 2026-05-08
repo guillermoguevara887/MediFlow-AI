@@ -1,602 +1,896 @@
-import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+// scripts/seed.js
+// MediFlow AI - Realistic English demo data generator
+// Generates 5000 triage records across the last 3 months by default.
+//
+// Run:
+// node scripts/seed.js
+//
+// Recommended clean run:
+// CLEAR_TRIAGE_RECORDS=true node scripts/seed.js
+//
+// Windows PowerShell:
+// $env:CLEAR_TRIAGE_RECORDS="true"; node scripts/seed.js
+//
+// Optional controls:
+// TOTAL_RECORDS=5000
+// SEED_DAYS_BACK=90
+// SEED_START_DATE=2026-02-07
+// SEED_END_DATE=2026-05-07
+// BATCH_SIZE=500
+// SEED=20260507
 
-export const dynamic = "force-dynamic";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
-function normalizeColor(color) {
-  return String(color || "").toUpperCase();
+try {
+  require("dotenv").config({ path: ".env.local" });
+  require("dotenv").config({ path: ".env" });
+} catch {
+  // dotenv is optional, but recommended
 }
 
-function getPatientDisplayName(record, index = 0) {
-  const rawName = String(record?.nombre || "").trim();
+const { createClient } = require("@supabase/supabase-js");
 
-  if (rawName && rawName.toLowerCase() !== "paciente simulado") {
-    return rawName;
+const CONFIG = {
+  TABLE_NAME: "triage_records",
+  TOTAL_RECORDS: Number(process.env.TOTAL_RECORDS || 5000),
+  DAYS_BACK: Number(process.env.SEED_DAYS_BACK || 90),
+  START_DATE: process.env.SEED_START_DATE || null,
+  END_DATE: process.env.SEED_END_DATE || null,
+  BATCH_SIZE: Number(process.env.BATCH_SIZE || 500),
+  CLEAR_OLD_DATA: String(process.env.CLEAR_TRIAGE_RECORDS || "false") === "true",
+  SEED: Number(process.env.SEED || 20260507),
+};
+
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+const SUPABASE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+
+if (!SUPABASE_URL) {
+  console.error("❌ Missing NEXT_PUBLIC_SUPABASE_URL");
+  process.exit(1);
+}
+
+if (!SUPABASE_KEY) {
+  console.error(
+    "❌ Missing Supabase key. Recommended: SUPABASE_SERVICE_ROLE_KEY for seeding."
+  );
+  process.exit(1);
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// --------------------------------------------------
+// Deterministic random generator
+// This makes the seed reproducible.
+// --------------------------------------------------
+let internalSeed = CONFIG.SEED;
+
+function random() {
+  internalSeed = (internalSeed * 1664525 + 1013904223) % 4294967296;
+  return internalSeed / 4294967296;
+}
+
+function randomInt(min, max) {
+  return Math.floor(random() * (max - min + 1)) + min;
+}
+
+function pickOne(items) {
+  return items[Math.floor(random() * items.length)];
+}
+
+function pickWeighted(items) {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  let value = random() * total;
+
+  for (const item of items) {
+    value -= item.weight;
+    if (value <= 0) return item.value;
   }
 
-  const shortId = record?.id
-    ? String(record.id).split("-")[0]
-    : String(index + 1).padStart(4, "0");
-
-  return `Paciente #${shortId}`;
+  return items[items.length - 1].value;
 }
 
-function formatDate(dateString) {
-  if (!dateString) return "Sin fecha";
+// --------------------------------------------------
+// Patient names
+// --------------------------------------------------
+const FIRST_NAMES = [
+  "James",
+  "Mary",
+  "John",
+  "Patricia",
+  "Robert",
+  "Jennifer",
+  "Michael",
+  "Linda",
+  "William",
+  "Elizabeth",
+  "David",
+  "Barbara",
+  "Richard",
+  "Susan",
+  "Joseph",
+  "Jessica",
+  "Thomas",
+  "Sarah",
+  "Charles",
+  "Karen",
+  "Daniel",
+  "Nancy",
+  "Matthew",
+  "Lisa",
+  "Anthony",
+  "Betty",
+  "Mark",
+  "Sandra",
+  "Donald",
+  "Ashley",
+  "Steven",
+  "Kimberly",
+  "Paul",
+  "Emily",
+  "Andrew",
+  "Donna",
+  "Joshua",
+  "Michelle",
+  "Kevin",
+  "Carol",
+  "Brian",
+  "Amanda",
+  "George",
+  "Melissa",
+  "Edward",
+  "Deborah",
+  "Ronald",
+  "Stephanie",
+  "Timothy",
+  "Rebecca",
+  "Jason",
+  "Laura",
+  "Jeffrey",
+  "Sharon",
+  "Ryan",
+  "Cynthia",
+  "Jacob",
+  "Kathleen",
+  "Gary",
+  "Amy",
+  "Nicholas",
+  "Angela",
+  "Eric",
+  "Shirley",
+  "Jonathan",
+  "Brenda",
+  "Stephen",
+  "Emma",
+  "Larry",
+  "Olivia",
+  "Justin",
+  "Sophia",
+  "Scott",
+  "Isabella",
+  "Brandon",
+  "Mia",
+  "Benjamin",
+  "Charlotte",
+];
 
-  return new Intl.DateTimeFormat("es-ES", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(dateString));
+const LAST_NAMES = [
+  "Smith",
+  "Johnson",
+  "Williams",
+  "Brown",
+  "Jones",
+  "Garcia",
+  "Miller",
+  "Davis",
+  "Rodriguez",
+  "Martinez",
+  "Hernandez",
+  "Lopez",
+  "Gonzalez",
+  "Wilson",
+  "Anderson",
+  "Thomas",
+  "Taylor",
+  "Moore",
+  "Jackson",
+  "Martin",
+  "Lee",
+  "Perez",
+  "Thompson",
+  "White",
+  "Harris",
+  "Sanchez",
+  "Clark",
+  "Ramirez",
+  "Lewis",
+  "Robinson",
+  "Walker",
+  "Young",
+  "Allen",
+  "King",
+  "Wright",
+  "Scott",
+  "Torres",
+  "Nguyen",
+  "Hill",
+  "Flores",
+  "Green",
+  "Adams",
+  "Nelson",
+  "Baker",
+  "Hall",
+  "Rivera",
+  "Campbell",
+  "Mitchell",
+  "Carter",
+  "Roberts",
+];
+
+function generatePatientName() {
+  return `${pickOne(FIRST_NAMES)} ${pickOne(LAST_NAMES)}`;
 }
 
-function formatShortDate(dateString) {
-  if (!dateString) return "";
+// --------------------------------------------------
+// Clinical scenarios in English
+// --------------------------------------------------
+const GREEN_SCENARIOS = [
+  {
+    sintomas: "Mild sore throat, nasal congestion, and dry cough since yesterday.",
+    mensaje:
+      "Low-risk case. The patient can receive general guidance and routine follow-up if symptoms worsen.",
+    reasons: [
+      "Symptoms suggest a mild upper respiratory condition.",
+      "No emergency warning signs were reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Mild headache, fatigue, and general discomfort without fever.",
+    mensaje:
+      "Low-risk case. Rest, hydration, and observation are recommended.",
+    reasons: [
+      "The headache is mild and not associated with neurological symptoms.",
+      "No high fever or breathing difficulty was reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Mild nausea after eating, without persistent vomiting or severe abdominal pain.",
+    mensaje:
+      "Low-risk case. The patient can be monitored with general supportive care.",
+    reasons: [
+      "Digestive symptoms are mild.",
+      "No severe abdominal pain or dehydration symptoms were reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Mild muscle pain after physical activity.",
+    mensaje:
+      "Low-risk case. No urgent medical evaluation is required at this time.",
+    reasons: [
+      "Pain appears related to physical exertion.",
+      "No systemic warning signs were reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Localized skin irritation with mild itching and no facial swelling.",
+    mensaje:
+      "Low-risk case. Observation and non-urgent care are appropriate if symptoms persist.",
+    reasons: [
+      "The skin reaction appears localized.",
+      "No signs of severe allergic reaction were reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Mild back pain after lifting a heavy object, no numbness or weakness.",
+    mensaje:
+      "Low-risk case. The patient may need non-urgent guidance and symptom monitoring.",
+    reasons: [
+      "Pain is associated with a mechanical trigger.",
+      "No weakness, numbness, or loss of bladder control was reported.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Runny nose, sneezing, and mild watery eyes.",
+    mensaje:
+      "Low-risk case. Symptoms are consistent with a mild allergy or cold-like presentation.",
+    reasons: [
+      "Symptoms are mild and localized.",
+      "No fever or respiratory distress was reported.",
+    ],
+    red_flags: [],
+  },
+];
 
-  return new Intl.DateTimeFormat("es-ES", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(dateString));
-}
+const YELLOW_SCENARIOS = [
+  {
+    sintomas: "Fever of 101.8°F, persistent cough, body aches, and fatigue.",
+    mensaje:
+      "Moderate-risk case. Same-day medical evaluation or close follow-up is recommended.",
+    reasons: [
+      "Fever and persistent cough may indicate a respiratory infection.",
+      "The patient should be evaluated if fever continues or symptoms worsen.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Moderate abdominal pain for several hours with nausea.",
+    mensaje:
+      "Moderate-risk case. Medical evaluation is recommended to rule out complications.",
+    reasons: [
+      "Persistent abdominal pain requires clinical assessment.",
+      "Nausea increases the need for monitoring and evaluation.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Frequent dizziness, weakness, and feeling faint when standing.",
+    mensaje:
+      "Moderate-risk case. The patient should be evaluated for hydration, blood pressure, or other causes.",
+    reasons: [
+      "Recurring dizziness may be related to several clinical conditions.",
+      "Persistent weakness requires medical review.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Severe ear pain, low-grade fever, and pressure in the ear.",
+    mensaje:
+      "Moderate-risk case. Non-emergency medical evaluation is recommended.",
+    reasons: [
+      "Severe ear pain may require treatment.",
+      "Fever suggests a possible infection.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Repeated vomiting during the day, intense thirst, and fatigue.",
+    mensaje:
+      "Moderate-risk case. Evaluation is recommended due to possible dehydration.",
+    reasons: [
+      "Repeated vomiting can lead to dehydration.",
+      "Intense thirst and fatigue require monitoring.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Worsening sore throat, swollen glands, fever, and difficulty swallowing.",
+    mensaje:
+      "Moderate-risk case. The patient should receive same-day or next-day evaluation.",
+    reasons: [
+      "Worsening throat symptoms with fever may require clinical evaluation.",
+      "Difficulty swallowing increases the level of concern.",
+    ],
+    red_flags: [],
+  },
+  {
+    sintomas: "Painful urination, lower abdominal discomfort, and chills.",
+    mensaje:
+      "Moderate-risk case. Medical evaluation is recommended for possible infection.",
+    reasons: [
+      "Urinary symptoms with chills may indicate infection.",
+      "Timely evaluation may prevent worsening symptoms.",
+    ],
+    red_flags: [],
+  },
+];
 
-async function fetchAllTriageRecords() {
-  const pageSize = 1000;
-  const maxRecords = 3000;
-  let allRecords = [];
+const RED_SCENARIOS = [
+  {
+    sintomas: "Chest pain, shortness of breath, cold sweating, and nausea.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Chest pain with breathing difficulty is an emergency warning sign.",
+      "Symptoms may be associated with a cardiovascular emergency.",
+    ],
+    red_flags: ["chest_pain", "shortness_of_breath"],
+  },
+  {
+    sintomas: "Severe difficulty breathing, bluish lips, and confusion.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Severe breathing difficulty is an emergency warning sign.",
+      "Confusion may indicate low oxygen levels or another serious condition.",
+    ],
+    red_flags: ["severe_breathing_difficulty", "confusion"],
+  },
+  {
+    sintomas:
+      "Sudden weakness on one side of the body, trouble speaking, and severe headache.",
+    mensaje:
+      "Critical case. Immediate evaluation is required due to possible neurological emergency.",
+    reasons: [
+      "One-sided weakness and trouble speaking are major warning signs.",
+      "Symptoms may indicate a stroke-like event.",
+    ],
+    red_flags: ["one_sided_weakness", "trouble_speaking"],
+  },
+  {
+    sintomas: "Heavy bleeding after an injury, dizziness, and pale skin.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Heavy bleeding may compromise the patient's stability.",
+      "Dizziness and pale skin may suggest significant blood loss.",
+    ],
+    red_flags: ["heavy_bleeding", "dizziness"],
+  },
+  {
+    sintomas: "Severe abdominal pain, high fever, and rigid abdomen.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Severe abdominal pain with high fever may indicate an abdominal emergency.",
+      "A rigid abdomen is a serious clinical warning sign.",
+    ],
+    red_flags: ["severe_abdominal_pain", "high_fever"],
+  },
+  {
+    sintomas:
+      "Severe allergic reaction with facial swelling, wheezing, and difficulty breathing.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Facial swelling with breathing difficulty may indicate anaphylaxis.",
+      "Wheezing and respiratory symptoms require urgent intervention.",
+    ],
+    red_flags: ["facial_swelling", "wheezing", "difficulty_breathing"],
+  },
+  {
+    sintomas: "Loss of consciousness, confusion after waking, and repeated vomiting.",
+    mensaje: "Critical case. Immediate medical attention is required.",
+    reasons: [
+      "Loss of consciousness is an emergency warning sign.",
+      "Confusion and repeated vomiting require urgent evaluation.",
+    ],
+    red_flags: ["loss_of_consciousness", "confusion", "repeated_vomiting"],
+  },
+];
 
-  for (let from = 0; from < maxRecords; from += pageSize) {
-    const to = from + pageSize - 1;
+const RESPIRATORY_CLUSTER_SCENARIOS = [
+  {
+    sintomas: "Fever, persistent cough, nasal congestion, and intense fatigue.",
+    mensaje:
+      "Moderate-risk case within an elevated respiratory pattern. Evaluation and follow-up are recommended.",
+    reasons: [
+      "Symptoms are consistent with a respiratory infection.",
+      "This case belongs to a simulated increase in respiratory complaints.",
+    ],
+    red_flags: [],
+    color: "YELLOW",
+  },
+  {
+    sintomas: "Strong cough, fever of 102.2°F, sore throat, and body aches.",
+    mensaje:
+      "Moderate-risk case. Same-day evaluation is recommended if symptoms persist.",
+    reasons: [
+      "High fever and persistent cough increase the level of concern.",
+      "The patient may require testing or clinical follow-up.",
+    ],
+    red_flags: [],
+    color: "YELLOW",
+  },
+  {
+    sintomas: "Shortness of breath, high fever, and persistent cough.",
+    mensaje:
+      "Critical respiratory case. Immediate medical attention is required.",
+    reasons: [
+      "Shortness of breath is an emergency warning sign.",
+      "High fever with respiratory compromise requires rapid evaluation.",
+    ],
+    red_flags: ["shortness_of_breath", "high_fever"],
+    color: "RED",
+  },
+];
 
-    const { data, error } = await supabase
-      .from("triage_records")
-      .select("id, nombre, sintomas, color, mensaje, reasons, red_flags, created_at")
-      .order("created_at", { ascending: false })
-      .range(from, to);
+const GASTRO_CLUSTER_SCENARIOS = [
+  {
+    sintomas: "Vomiting, diarrhea, stomach cramps, and weakness after eating.",
+    mensaje:
+      "Moderate-risk case within a gastrointestinal pattern. Hydration and evaluation may be needed.",
+    reasons: [
+      "Vomiting and diarrhea may lead to dehydration.",
+      "Cluster pattern suggests a possible food-related increase in cases.",
+    ],
+    red_flags: [],
+    color: "YELLOW",
+  },
+  {
+    sintomas:
+      "Severe vomiting, dizziness, dry mouth, and inability to keep fluids down.",
+    mensaje:
+      "Critical dehydration risk. Immediate medical evaluation is recommended.",
+    reasons: [
+      "Inability to keep fluids down increases dehydration risk.",
+      "Dizziness and dry mouth are concerning signs.",
+    ],
+    red_flags: ["possible_dehydration", "persistent_vomiting"],
+    color: "RED",
+  },
+];
 
-    if (error) {
-      return { records: [], error };
-    }
+const HEAT_CLUSTER_SCENARIOS = [
+  {
+    sintomas: "Dizziness, headache, intense thirst, and weakness after heat exposure.",
+    mensaje:
+      "Moderate-risk heat-related case. Cooling, hydration, and evaluation are recommended.",
+    reasons: [
+      "Heat exposure with weakness may indicate heat exhaustion.",
+      "Dizziness and intense thirst require monitoring.",
+    ],
+    red_flags: [],
+    color: "YELLOW",
+  },
+  {
+    sintomas: "Confusion, very high temperature, dry skin, and collapse after heat exposure.",
+    mensaje:
+      "Critical heat-related case. Immediate medical attention is required.",
+    reasons: [
+      "Confusion and collapse after heat exposure are emergency warning signs.",
+      "Symptoms may indicate heat stroke.",
+    ],
+    red_flags: ["confusion", "collapse", "possible_heat_stroke"],
+    color: "RED",
+  },
+];
 
-    allRecords = [...allRecords, ...(data || [])];
+// --------------------------------------------------
+// Date controls
+// --------------------------------------------------
+function parseDateOnly(value, label) {
+  const date = new Date(`${value}T00:00:00`);
 
-    if (!data || data.length < pageSize) {
-      break;
-    }
+  if (Number.isNaN(date.getTime())) {
+    console.error(`❌ Invalid ${label}: ${value}. Use YYYY-MM-DD.`);
+    process.exit(1);
   }
 
-  return { records: allRecords, error: null };
+  return date;
 }
 
-function getLastDaysData(records, days = 14) {
-  const map = new Map();
+function startOfDay(date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
 
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
+function endOfDay(date) {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
+}
 
-    const key = date.toISOString().slice(0, 10);
+function getDateRange() {
+  const end = CONFIG.END_DATE
+    ? endOfDay(parseDateOnly(CONFIG.END_DATE, "SEED_END_DATE"))
+    : endOfDay(new Date());
 
-    map.set(key, {
-      day: key,
-      total: 0,
-      red: 0,
-      yellow: 0,
-      green: 0,
-    });
+  const start = CONFIG.START_DATE
+    ? startOfDay(parseDateOnly(CONFIG.START_DATE, "SEED_START_DATE"))
+    : (() => {
+      const date = startOfDay(end);
+      date.setDate(date.getDate() - CONFIG.DAYS_BACK + 1);
+      return date;
+    })();
+
+  if (start > end) {
+    console.error("❌ SEED_START_DATE cannot be after SEED_END_DATE.");
+    process.exit(1);
   }
 
-  records.forEach((record) => {
-    if (!record.created_at) return;
+  return { start, end };
+}
 
-    const key = new Date(record.created_at).toISOString().slice(0, 10);
-    const color = normalizeColor(record.color);
+function getDaysBetween(start, end) {
+  const days = [];
+  const cursor = startOfDay(start);
 
-    if (map.has(key)) {
-      const item = map.get(key);
-      item.total += 1;
+  while (cursor <= end) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
 
-      if (color === "RED") item.red += 1;
-      if (color === "YELLOW") item.yellow += 1;
-      if (color === "GREEN") item.green += 1;
+  return days;
+}
+
+// --------------------------------------------------
+// Realistic distribution
+// --------------------------------------------------
+function buildDayProfiles() {
+  const { start, end } = getDateRange();
+  const dates = getDaysBetween(start, end);
+  const totalDays = dates.length;
+
+  const anomalyOffsets = new Set([
+    Math.floor(totalDays * 0.18),
+    Math.floor(totalDays * 0.43),
+    Math.floor(totalDays * 0.69),
+    Math.max(totalDays - 5, 0),
+  ]);
+
+  return dates.map((date, offset) => {
+    const dayOfWeek = date.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    const isMonday = dayOfWeek === 1;
+    const isFriday = dayOfWeek === 5;
+    const isRecent = offset >= totalDays - 10;
+    const isAnomalyDay = anomalyOffsets.has(offset);
+
+    let anomalyType = null;
+
+    if (isAnomalyDay) {
+      anomalyType = pickWeighted([
+        { value: "respiratory", weight: 55 },
+        { value: "gastro", weight: 25 },
+        { value: "heat", weight: 20 },
+      ]);
     }
+
+    let weight = 1;
+
+    // Fewer non-urgent visits on weekends
+    if (isWeekend) weight *= 0.72;
+
+    // Mondays are often heavier
+    if (isMonday) weight *= 1.2;
+
+    // Fridays slightly higher
+    if (isFriday) weight *= 1.08;
+
+    // Recent days look active in the dashboard
+    if (isRecent) weight *= 1.15;
+
+    // Anomaly days have visible spikes
+    if (isAnomalyDay) weight *= 2.35;
+
+    // Controlled noise
+    weight *= 0.75 + random() * 0.65;
+
+    return {
+      date,
+      offset,
+      weight,
+      isWeekend,
+      isMonday,
+      isFriday,
+      isRecent,
+      isAnomalyDay,
+      anomalyType,
+      count: 0,
+    };
   });
-
-  return Array.from(map.values());
 }
 
-function StatCard({ title, value, description, color }) {
-  const styles = {
-    RED: {
-      badge: "bg-red-50 text-red-700 border-red-200",
-      dot: "bg-red-500",
-    },
-    YELLOW: {
-      badge: "bg-amber-50 text-amber-700 border-amber-200",
-      dot: "bg-amber-500",
-    },
-    GREEN: {
-      badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      dot: "bg-emerald-500",
-    },
-    BLUE: {
-      badge: "bg-blue-50 text-blue-700 border-blue-200",
-      dot: "bg-blue-500",
-    },
+function distributeRecordsAcrossDays() {
+  const days = buildDayProfiles();
+  const totalWeight = days.reduce((sum, day) => sum + day.weight, 0);
+
+  let assigned = 0;
+
+  for (const day of days) {
+    day.count = Math.floor((day.weight / totalWeight) * CONFIG.TOTAL_RECORDS);
+    assigned += day.count;
+  }
+
+  while (assigned < CONFIG.TOTAL_RECORDS) {
+    const day = pickWeighted(days.map((d) => ({ value: d, weight: d.weight })));
+    day.count += 1;
+    assigned += 1;
+  }
+
+  return days;
+}
+
+function pickColorForDay(day) {
+  if (day.isAnomalyDay) {
+    return pickWeighted([
+      { value: "GREEN", weight: 30 },
+      { value: "YELLOW", weight: 52 },
+      { value: "RED", weight: 18 },
+    ]);
+  }
+
+  if (day.isRecent) {
+    return pickWeighted([
+      { value: "GREEN", weight: 46 },
+      { value: "YELLOW", weight: 40 },
+      { value: "RED", weight: 14 },
+    ]);
+  }
+
+  return pickWeighted([
+    { value: "GREEN", weight: 54 },
+    { value: "YELLOW", weight: 36 },
+    { value: "RED", weight: 10 },
+  ]);
+}
+
+function pickScenario(color, day) {
+  if (day.isAnomalyDay && random() < 0.66) {
+    let pool = RESPIRATORY_CLUSTER_SCENARIOS;
+
+    if (day.anomalyType === "gastro") pool = GASTRO_CLUSTER_SCENARIOS;
+    if (day.anomalyType === "heat") pool = HEAT_CLUSTER_SCENARIOS;
+
+    const matchingColor = pool.filter((scenario) => scenario.color === color);
+
+    if (matchingColor.length > 0 && random() < 0.75) {
+      return pickOne(matchingColor);
+    }
+
+    return pickOne(pool);
+  }
+
+  if (color === "RED") return pickOne(RED_SCENARIOS);
+  if (color === "YELLOW") return pickOne(YELLOW_SCENARIOS);
+
+  return pickOne(GREEN_SCENARIOS);
+}
+
+function pickRealisticHour(color) {
+  const group =
+    color === "RED"
+      ? pickWeighted([
+        { value: "morning", weight: 26 },
+        { value: "afternoon", weight: 28 },
+        { value: "evening", weight: 23 },
+        { value: "night", weight: 23 },
+      ])
+      : pickWeighted([
+        { value: "morning", weight: 39 },
+        { value: "afternoon", weight: 35 },
+        { value: "evening", weight: 19 },
+        { value: "night", weight: 7 },
+      ]);
+
+  if (group === "morning") return randomInt(8, 11);
+  if (group === "afternoon") return randomInt(12, 17);
+  if (group === "evening") return randomInt(18, 22);
+
+  return pickOne([0, 1, 2, 3, 4, 5, 6, 23]);
+}
+
+function buildCreatedAt(day, color) {
+  const date = new Date(day.date);
+  const hour = pickRealisticHour(color);
+
+  date.setHours(hour);
+  date.setMinutes(randomInt(0, 59));
+  date.setSeconds(randomInt(0, 59));
+  date.setMilliseconds(0);
+
+  return date.toISOString();
+}
+
+function generateRecord(day) {
+  const selectedColor = pickColorForDay(day);
+  const scenario = pickScenario(selectedColor, day);
+  const finalColor = scenario.color || selectedColor;
+
+  return {
+    nombre: generatePatientName(),
+    sintomas: scenario.sintomas,
+    color: finalColor,
+    mensaje: scenario.mensaje,
+    reasons: scenario.reasons,
+    red_flags: scenario.red_flags,
+    created_at: buildCreatedAt(day, finalColor),
   };
-
-  const current = styles[color] || styles.BLUE;
-
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-
-          <h2 className="mt-3 text-4xl font-bold tracking-tight text-slate-900">
-            {value}
-          </h2>
-
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            {description}
-          </p>
-        </div>
-
-        <div
-          className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${current.badge}`}
-        >
-          <span className={`h-2.5 w-2.5 rounded-full ${current.dot}`} />
-          {color}
-        </div>
-      </div>
-    </div>
-  );
 }
 
-function FilterButton({ href, active, children }) {
-  return (
-    <Link
-      href={href}
-      className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${active
-          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-          : "border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-        }`}
-    >
-      {children}
-    </Link>
-  );
-}
+// --------------------------------------------------
+// Supabase operations
+// --------------------------------------------------
+async function clearOldData() {
+  console.log("🧹 CLEAR_TRIAGE_RECORDS=true detected.");
+  console.log("🧹 Deleting existing triage records...");
 
-function CasesChart({ data }) {
-  const maxValue = Math.max(...data.map((item) => item.total), 1);
-
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-start">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Casos en el tiempo
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Registros generados durante los últimos 14 días.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-3 text-xs text-slate-500">
-          <span>
-            <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
-            RED
-          </span>
-          <span>
-            <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-amber-400" />
-            YELLOW
-          </span>
-          <span>
-            <span className="mr-1 inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
-            GREEN
-          </span>
-        </div>
-      </div>
-
-      <div className="flex h-72 items-end gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        {data.map((item) => {
-          const height = Math.max((item.total / maxValue) * 100, 4);
-
-          return (
-            <div
-              key={item.day}
-              className="flex h-full flex-1 flex-col items-center justify-end"
-            >
-              <div className="mb-2 text-xs font-semibold text-slate-500">
-                {item.total}
-              </div>
-
-              <div
-                className="flex w-full flex-col justify-end overflow-hidden rounded-t-xl bg-slate-200"
-                style={{ height: `${height}%` }}
-                title={`${item.total} casos`}
-              >
-                <div
-                  className="bg-red-500"
-                  style={{
-                    height: `${item.total ? (item.red / item.total) * 100 : 0}%`,
-                  }}
-                />
-                <div
-                  className="bg-amber-400"
-                  style={{
-                    height: `${item.total ? (item.yellow / item.total) * 100 : 0}%`,
-                  }}
-                />
-                <div
-                  className="bg-emerald-500"
-                  style={{
-                    height: `${item.total ? (item.green / item.total) * 100 : 0}%`,
-                  }}
-                />
-              </div>
-
-              <div className="mt-3 text-xs text-slate-500">
-                {formatShortDate(item.day)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function AlertsList({ alerts }) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-5 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Alertas críticas
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Casos RED recientes que requieren revisión inmediata.
-          </p>
-        </div>
-
-        <span className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
-          EN VIVO
-        </span>
-      </div>
-
-      {alerts.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-500">
-          No hay alertas críticas por el momento.
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {alerts.map((alert, index) => (
-            <div
-              key={alert.id}
-              className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
-            >
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">
-                    {getPatientDisplayName(alert, index)}
-                  </h3>
-
-                  <p className="mt-2 text-sm text-slate-600">
-                    <span className="font-medium text-slate-800">Síntomas:</span>{" "}
-                    {alert.sintomas || "No especificados"}
-                  </p>
-
-                  <p className="mt-2 text-sm text-slate-500">
-                    {alert.mensaje || "Sin mensaje disponible"}
-                  </p>
-                </div>
-
-                <div className="text-left md:text-right">
-                  <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
-                    RED
-                  </span>
-
-                  <p className="mt-2 text-xs text-slate-500">
-                    {formatDate(alert.created_at)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function RecentRecordsTable({ records }) {
-  return (
-    <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
-        <div>
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Registros recientes
-          </h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Últimos pacientes registrados en el sistema.
-          </p>
-        </div>
-      </div>
-
-      <div className="overflow-hidden rounded-2xl border border-slate-200">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-3 font-semibold">Paciente</th>
-              <th className="px-4 py-3 font-semibold">Síntomas</th>
-              <th className="px-4 py-3 font-semibold">Color</th>
-              <th className="px-4 py-3 font-semibold">Fecha</th>
-            </tr>
-          </thead>
-
-          <tbody className="divide-y divide-slate-200 bg-white">
-            {records.map((record, index) => {
-              const color = normalizeColor(record.color);
-
-              const badgeClass =
-                color === "RED"
-                  ? "border-red-200 bg-red-50 text-red-700"
-                  : color === "YELLOW"
-                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700";
-
-              return (
-                <tr key={record.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-4 font-medium text-slate-900">
-                    {getPatientDisplayName(record, index)}
-                  </td>
-                  <td className="px-4 py-4 text-slate-600">
-                    {record.sintomas || "No especificados"}
-                  </td>
-                  <td className="px-4 py-4">
-                    <span
-                      className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${badgeClass}`}
-                    >
-                      {color || "N/A"}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 text-slate-500">
-                    {formatDate(record.created_at)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-export default async function DashboardPage({ searchParams }) {
-  const params = await searchParams;
-  const selectedColor = normalizeColor(params?.color || "ALL");
-
-  const { records, error } = await fetchAllTriageRecords();
+  const { error } = await supabase
+    .from(CONFIG.TABLE_NAME)
+    .delete()
+    .not("created_at", "is", null);
 
   if (error) {
-    return (
-      <main className="min-h-screen bg-[#f4f7fb] px-6 py-10">
-        <div className="mx-auto max-w-4xl rounded-3xl border border-red-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-bold text-slate-900">
-            Error del dashboard
-          </h1>
-          <p className="mt-3 text-red-600">
-            No se pudieron cargar los registros desde Supabase.
-          </p>
-          <pre className="mt-4 overflow-auto rounded-2xl bg-slate-50 p-4 text-sm text-red-700">
-            {JSON.stringify(error, null, 2)}
-          </pre>
-        </div>
-      </main>
-    );
+    console.error("❌ Error deleting old records:");
+    console.error(error);
+    process.exit(1);
   }
 
-  const allRecords = records || [];
-  const total = allRecords.length;
-
-  const redCount = allRecords.filter(
-    (record) => normalizeColor(record.color) === "RED"
-  ).length;
-
-  const yellowCount = allRecords.filter(
-    (record) => normalizeColor(record.color) === "YELLOW"
-  ).length;
-
-  const greenCount = allRecords.filter(
-    (record) => normalizeColor(record.color) === "GREEN"
-  ).length;
-
-  const redPercentage = total > 0 ? ((redCount / total) * 100).toFixed(1) : "0";
-
-  const filteredRecords =
-    selectedColor === "ALL"
-      ? allRecords
-      : allRecords.filter(
-        (record) => normalizeColor(record.color) === selectedColor
-      );
-
-  const criticalAlerts = allRecords
-    .filter((record) => normalizeColor(record.color) === "RED")
-    .slice(0, 5);
-
-  const chartData = getLastDaysData(allRecords, 14);
-
-  const recentRecords = filteredRecords.slice(0, 10);
-
-  return (
-    <main className="min-h-screen bg-[#f4f7fb] px-6 py-8 text-slate-900">
-      <div className="mx-auto max-w-7xl">
-        <section className="mb-8">
-          <div className="mb-6">
-            <Link
-              href="/"
-              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50"
-            >
-              ← Volver al inicio
-            </Link>
-          </div>
-
-          <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-            <div>
-              <div className="mb-3 inline-flex rounded-full border border-blue-200 bg-blue-50 px-4 py-1 text-sm font-medium text-blue-700">
-                MediFlow AI Hospital Dashboard
-              </div>
-
-              <h1 className="text-4xl font-bold tracking-tight text-slate-900 md:text-5xl">
-                Resumen de triaje en tiempo real
-              </h1>
-
-              <p className="mt-3 max-w-3xl text-slate-600">
-                Monitoreo de registros de pacientes para identificar distribución
-                de severidad, casos críticos y comportamiento general del flujo
-                hospitalario.
-              </p>
-            </div>
-
-            <div className="rounded-3xl border border-slate-200 bg-white px-6 py-5 text-right shadow-sm">
-              <p className="text-sm text-slate-500">Total de registros</p>
-              <p className="mt-1 text-3xl font-bold text-slate-900">{total}</p>
-            </div>
-          </div>
-        </section>
-
-        <section className="mb-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-          <StatCard
-            title="Casos críticos"
-            value={redCount}
-            description={`${redPercentage}% del total de registros`}
-            color="RED"
-          />
-
-          <StatCard
-            title="Casos moderados"
-            value={yellowCount}
-            description="Pacientes que pueden requerir atención programada"
-            color="YELLOW"
-          />
-
-          <StatCard
-            title="Casos de bajo riesgo"
-            value={greenCount}
-            description="Pacientes aptos para orientación no urgente"
-            color="GREEN"
-          />
-
-          <StatCard
-            title="Estado del sistema"
-            value="Activo"
-            description="Validación sintética de triaje en ejecución"
-            color="BLUE"
-          />
-        </section>
-
-        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">
-                Filtrar registros
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Vista actual: {selectedColor === "ALL" ? "Todos" : selectedColor}
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              <FilterButton href="/dashboard" active={selectedColor === "ALL"}>
-                Todos
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=RED"
-                active={selectedColor === "RED"}
-              >
-                RED
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=YELLOW"
-                active={selectedColor === "YELLOW"}
-              >
-                YELLOW
-              </FilterButton>
-              <FilterButton
-                href="/dashboard?color=GREEN"
-                active={selectedColor === "GREEN"}
-              >
-                GREEN
-              </FilterButton>
-            </div>
-          </div>
-        </section>
-
-        <section className="mb-8 grid gap-6 xl:grid-cols-[1.35fr_1fr]">
-          <CasesChart data={chartData} />
-          <AlertsList alerts={criticalAlerts} />
-        </section>
-
-        <section className="mb-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-2xl font-semibold text-slate-900">
-            Distribución del triaje
-          </h2>
-
-          <p className="mt-1 text-sm text-slate-500">
-            Proporción actual de severidad sobre todos los registros cargados.
-          </p>
-
-          <div className="mt-6 overflow-hidden rounded-full border border-slate-200 bg-slate-100">
-            <div className="flex h-5 w-full">
-              <div
-                className="bg-red-500"
-                style={{
-                  width: `${total ? (redCount / total) * 100 : 0}%`,
-                }}
-              />
-              <div
-                className="bg-amber-400"
-                style={{
-                  width: `${total ? (yellowCount / total) * 100 : 0}%`,
-                }}
-              />
-              <div
-                className="bg-emerald-500"
-                style={{
-                  width: `${total ? (greenCount / total) * 100 : 0}%`,
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-4 text-sm text-slate-600">
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-red-500" />
-              RED: {redCount}
-            </span>
-
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-amber-400" />
-              YELLOW: {yellowCount}
-            </span>
-
-            <span>
-              <span className="mr-2 inline-block h-3 w-3 rounded-full bg-emerald-500" />
-              GREEN: {greenCount}
-            </span>
-          </div>
-        </section>
-
-        <RecentRecordsTable records={recentRecords} />
-      </div>
-    </main>
-  );
+  console.log("✅ Existing triage records deleted.");
 }
+
+async function insertInBatches(records) {
+  let inserted = 0;
+
+  for (let i = 0; i < records.length; i += CONFIG.BATCH_SIZE) {
+    const batch = records.slice(i, i + CONFIG.BATCH_SIZE);
+
+    const { error } = await supabase.from(CONFIG.TABLE_NAME).insert(batch);
+
+    if (error) {
+      console.error(`❌ Error inserting batch starting at index ${i}:`);
+      console.error(error);
+      process.exit(1);
+    }
+
+    inserted += batch.length;
+    console.log(`✅ Inserted ${inserted}/${records.length}`);
+  }
+}
+
+function printSummary(records, days) {
+  const counts = records.reduce(
+    (acc, record) => {
+      acc.total += 1;
+      acc[record.color] += 1;
+      return acc;
+    },
+    { total: 0, RED: 0, YELLOW: 0, GREEN: 0 }
+  );
+
+  const sortedDates = records
+    .map((record) => record.created_at)
+    .sort((a, b) => new Date(a) - new Date(b));
+
+  const anomalyDays = days
+    .filter((day) => day.isAnomalyDay)
+    .map((day) => ({
+      date: day.date.toISOString().slice(0, 10),
+      type: day.anomalyType,
+      count: day.count,
+    }));
+
+  console.log("");
+  console.log("📊 Seed summary");
+  console.log("---------------");
+  console.log(`Total records: ${counts.total}`);
+  console.log(`GREEN: ${counts.GREEN}`);
+  console.log(`YELLOW: ${counts.YELLOW}`);
+  console.log(`RED: ${counts.RED}`);
+  console.log(`First record date: ${sortedDates[0]}`);
+  console.log(`Last record date: ${sortedDates[sortedDates.length - 1]}`);
+  console.log("");
+  console.log("⚠️ Simulated anomaly days:");
+  console.table(anomalyDays);
+  console.log("");
+}
+
+async function main() {
+  console.log("🚀 MediFlow AI seed started");
+  console.log(`Records: ${CONFIG.TOTAL_RECORDS}`);
+  console.log(`Table: ${CONFIG.TABLE_NAME}`);
+
+  const { start, end } = getDateRange();
+
+  console.log(`Start date: ${start.toISOString().slice(0, 10)}`);
+  console.log(`End date: ${end.toISOString().slice(0, 10)}`);
+  console.log("");
+
+  if (CONFIG.CLEAR_OLD_DATA) {
+    await clearOldData();
+  }
+
+  const days = distributeRecordsAcrossDays();
+
+  const records = days.flatMap((day) =>
+    Array.from({ length: day.count }, () => generateRecord(day))
+  );
+
+  records.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  await insertInBatches(records);
+
+  printSummary(records, days);
+
+  console.log("🎉 Seed completed successfully.");
+}
+
+main().catch((error) => {
+  console.error("❌ Unexpected seed error:");
+  console.error(error);
+  process.exit(1);
+});
