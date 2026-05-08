@@ -2,6 +2,7 @@ import { fetchAllTriageRecords } from "@/lib/triage-data";
 import { normalizeColor } from "@/lib/triage-analytics";
 import AlertsList from "@/components/dashboard/AlertsList";
 
+
 export const dynamic = "force-dynamic";
 
 export default async function CriticalAlertsPage() {
