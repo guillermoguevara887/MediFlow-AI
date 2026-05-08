@@ -1,21 +1,15 @@
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { fetchAllTriageRecords } from "@/lib/triage-data";
+import {
+  normalizeColor,
+  getLastDaysData,
+  getAnomalyInsights,
+  getTopClinicalPattern,
+} from "@/lib/triage-analytics";
 
 export const dynamic = "force-dynamic";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 
-const supabaseKey =
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-const supabase =
-  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
-
-function normalizeColor(color) {
-  return String(color || "").toUpperCase();
-}
 
 function getPatientDisplayName(record, index = 0) {
   const rawName = String(record?.nombre || "").trim();
@@ -56,80 +50,6 @@ function formatPercent(value) {
   return `${value.toFixed(1)}%`;
 }
 
-async function fetchAllTriageRecords() {
-  if (!supabase) {
-    return {
-      records: [],
-      error: {
-        message:
-          "Missing Supabase environment variables. Check NEXT_PUBLIC_SUPABASE_URL and SUPABASE_ANON_KEY.",
-      },
-    };
-  }
-
-  const pageSize = 1000;
-  const maxRecords = 6000;
-  let allRecords = [];
-
-  for (let from = 0; from < maxRecords; from += pageSize) {
-    const to = from + pageSize - 1;
-
-    const { data, error } = await supabase
-      .from("triage_records")
-      .select("id, nombre, sintomas, color, mensaje, reasons, red_flags, created_at")
-      .order("created_at", { ascending: false })
-      .range(from, to);
-
-    if (error) {
-      return { records: [], error };
-    }
-
-    allRecords = [...allRecords, ...(data || [])];
-
-    if (!data || data.length < pageSize) {
-      break;
-    }
-  }
-
-  return { records: allRecords, error: null };
-}
-
-function getLastDaysData(records, days = 14) {
-  const map = new Map();
-
-  for (let i = days - 1; i >= 0; i--) {
-    const date = new Date();
-    date.setDate(date.getDate() - i);
-
-    const key = date.toISOString().slice(0, 10);
-
-    map.set(key, {
-      day: key,
-      total: 0,
-      red: 0,
-      yellow: 0,
-      green: 0,
-    });
-  }
-
-  records.forEach((record) => {
-    if (!record.created_at) return;
-
-    const key = new Date(record.created_at).toISOString().slice(0, 10);
-    const color = normalizeColor(record.color);
-
-    if (map.has(key)) {
-      const item = map.get(key);
-      item.total += 1;
-
-      if (color === "RED") item.red += 1;
-      if (color === "YELLOW") item.yellow += 1;
-      if (color === "GREEN") item.green += 1;
-    }
-  });
-
-  return Array.from(map.values());
-}
 
 function getDailyStats(records) {
   const map = new Map();
@@ -204,128 +124,7 @@ function getDailyStats(records) {
   );
 }
 
-function getAnomalyInsights(records) {
-  const dailyStats = getDailyStats(records);
 
-  if (dailyStats.length === 0) {
-    return [];
-  }
-
-  const averageVolume =
-    dailyStats.reduce((sum, item) => sum + item.total, 0) / dailyStats.length;
-
-  const averageRed =
-    dailyStats.reduce((sum, item) => sum + item.red, 0) / dailyStats.length;
-
-  const volumeInsights = dailyStats
-    .map((item) => {
-      const volumeRatio = averageVolume > 0 ? item.total / averageVolume : 0;
-      const redRatio = averageRed > 0 ? item.red / averageRed : 0;
-
-      const clusterCandidates = [
-        { label: "Respiratory cluster", value: item.respiratory },
-        { label: "Gastrointestinal cluster", value: item.gastro },
-        { label: "Heat-related cluster", value: item.heat },
-      ].sort((a, b) => b.value - a.value);
-
-      const topCluster = clusterCandidates[0];
-
-      return {
-        ...item,
-        volumeRatio,
-        redRatio,
-        topCluster,
-        score: volumeRatio + redRatio * 0.7 + topCluster.value / Math.max(item.total, 1),
-      };
-    })
-    .filter((item) => item.volumeRatio >= 1.45 || item.redRatio >= 1.45)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 4);
-
-  return volumeInsights;
-}
-
-function getTopClinicalPattern(records) {
-  const counts = {
-    respiratory: 0,
-    gastro: 0,
-    heat: 0,
-    cardiac: 0,
-    neurological: 0,
-  };
-
-  records.forEach((record) => {
-    const text = [
-      record.sintomas,
-      record.mensaje,
-      Array.isArray(record.reasons) ? record.reasons.join(" ") : "",
-      Array.isArray(record.red_flags) ? record.red_flags.join(" ") : "",
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    if (
-      text.includes("cough") ||
-      text.includes("fever") ||
-      text.includes("breath") ||
-      text.includes("respiratory") ||
-      text.includes("sore throat")
-    ) {
-      counts.respiratory += 1;
-    }
-
-    if (
-      text.includes("vomit") ||
-      text.includes("diarrhea") ||
-      text.includes("stomach") ||
-      text.includes("abdominal") ||
-      text.includes("gastro")
-    ) {
-      counts.gastro += 1;
-    }
-
-    if (
-      text.includes("heat") ||
-      text.includes("thirst") ||
-      text.includes("dry skin") ||
-      text.includes("collapse")
-    ) {
-      counts.heat += 1;
-    }
-
-    if (
-      text.includes("chest") ||
-      text.includes("cardiovascular") ||
-      text.includes("cold sweating")
-    ) {
-      counts.cardiac += 1;
-    }
-
-    if (
-      text.includes("weakness on one side") ||
-      text.includes("trouble speaking") ||
-      text.includes("neurological") ||
-      text.includes("stroke")
-    ) {
-      counts.neurological += 1;
-    }
-  });
-
-  const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-
-  const labels = {
-    respiratory: "Respiratory symptoms",
-    gastro: "Gastrointestinal symptoms",
-    heat: "Heat-related symptoms",
-    cardiac: "Cardiac warning signs",
-    neurological: "Neurological warning signs",
-  };
-
-  return {
-    label: labels[winner?.[0]] || "General triage symptoms",
-    count: winner?.[1] || 0,
-  };
-}
 
 function StatCard({ title, value, description, color, footer }) {
   const styles = {
