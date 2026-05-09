@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const BUSINESS_START_HOUR = 8;
@@ -77,6 +77,16 @@ function getAppointmentStyle(priority) {
     };
   }
 
+  if (priority === "BLOCKED") {
+    return {
+      label: "Blocked",
+      card: "border-red-200 bg-red-50 text-red-950",
+      badge: "bg-red-600 text-white",
+      button: "bg-red-600 hover:bg-red-700 shadow-red-600/20",
+      icon: "🚨",
+    };
+  }
+
   return {
     label: "Routine",
     card: "border-emerald-200 bg-emerald-50 text-emerald-950",
@@ -86,7 +96,7 @@ function getAppointmentStyle(priority) {
   };
 }
 
-export default function AppointmentsPage() {
+function AppointmentsPageContent() {
   const searchParams = useSearchParams();
 
   const initialName = searchParams.get("name") || "";
@@ -106,9 +116,8 @@ export default function AppointmentsPage() {
   );
   const [patientSymptoms, setPatientSymptoms] = useState(initialSymptoms);
   const [triageColor, setTriageColor] = useState(initialColor);
-  const [appointmentPriority, setAppointmentPriority] = useState(
-    initialPriority
-  );
+  const [appointmentPriority, setAppointmentPriority] =
+    useState(initialPriority);
   const [doctorName, setDoctorName] = useState("General Care");
   const [notes, setNotes] = useState("");
 
@@ -223,9 +232,7 @@ export default function AppointmentsPage() {
           </Link>
 
           <div className="text-right">
-            <p className="text-sm font-black text-slate-900">
-              MediFlow AI
-            </p>
+            <p className="text-sm font-black text-slate-900">MediFlow AI</p>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
               Appointments
             </p>
@@ -295,9 +302,7 @@ export default function AppointmentsPage() {
                 </select>
               </div>
 
-              <div
-                className={`rounded-2xl border p-4 ${appointmentStyle.card}`}
-              >
+              <div className={`rounded-2xl border p-4 ${appointmentStyle.card}`}>
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-xs font-black uppercase tracking-[0.2em]">
@@ -312,11 +317,7 @@ export default function AppointmentsPage() {
                     </p>
                   </div>
 
-                  <div className="text-3xl">
-                    {appointmentPriority === "BLOCKED"
-                      ? "🚨"
-                      : appointmentStyle.icon}
-                  </div>
+                  <div className="text-3xl">{appointmentStyle.icon}</div>
                 </div>
 
                 <p className="mt-3 text-sm leading-6">
@@ -482,5 +483,23 @@ export default function AppointmentsPage() {
         </section>
       </section>
     </main>
+  );
+}
+
+export default function AppointmentsPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-50 px-6 py-8 text-slate-950">
+          <div className="mx-auto max-w-7xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-sm font-black text-slate-700">
+              Loading appointments...
+            </p>
+          </div>
+        </main>
+      }
+    >
+      <AppointmentsPageContent />
+    </Suspense>
   );
 }
