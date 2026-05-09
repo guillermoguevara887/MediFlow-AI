@@ -149,8 +149,16 @@ export default function Home() {
     }
   };
 
+
   const handleScheduleAppointment = () => {
-    router.push("/dashboard/appointments");
+    const params = new URLSearchParams({
+      name: nombreTrim || "Walk-in patient",
+      symptoms: sintomasTrim.slice(0, 300),
+      color: color || "GREEN",
+      priority: appointmentPriority || "ROUTINE",
+    });
+
+    router.push(`/dashboard/appointments?${params.toString()}`);
   };
 
   return (
@@ -252,8 +260,8 @@ export default function Home() {
                 onClick={analizarTriage}
                 disabled={cargando || !sintomasTrim}
                 className={`rounded-2xl px-5 py-4 text-sm font-black text-white shadow-lg shadow-blue-600/20 transition ${cargando || !sintomasTrim
-                    ? "cursor-not-allowed bg-slate-400 shadow-none"
-                    : "bg-blue-600 hover:bg-blue-700 active:scale-[0.99]"
+                  ? "cursor-not-allowed bg-slate-400 shadow-none"
+                  : "bg-blue-600 hover:bg-blue-700 active:scale-[0.99]"
                   }`}
               >
                 {cargando
@@ -390,8 +398,8 @@ export default function Home() {
               {medicalInput && appointmentEligible ? (
                 <div
                   className={`rounded-2xl border p-5 shadow-sm ${appointmentPriority === "PRIORITY"
-                      ? "border-amber-200 bg-amber-50 text-amber-950"
-                      : "border-emerald-200 bg-emerald-50 text-emerald-950"
+                    ? "border-amber-200 bg-amber-50 text-amber-950"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-950"
                     }`}
                 >
                   <div className="flex items-start justify-between gap-4">
@@ -417,8 +425,8 @@ export default function Home() {
                   <button
                     onClick={handleScheduleAppointment}
                     className={`mt-5 rounded-2xl px-5 py-3 text-sm font-black text-white shadow-lg transition active:scale-[0.99] ${appointmentPriority === "PRIORITY"
-                        ? "bg-amber-600 shadow-amber-600/20 hover:bg-amber-700"
-                        : "bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700"
+                      ? "bg-amber-600 shadow-amber-600/20 hover:bg-amber-700"
+                      : "bg-emerald-600 shadow-emerald-600/20 hover:bg-emerald-700"
                       }`}
                   >
                     {appointmentPriority === "PRIORITY"
