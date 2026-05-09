@@ -15,6 +15,342 @@ const RED_FLAGS = [
   },
 ];
 
+// ---- MEDICAL INTENT CLASSIFIER ----
+// Runs before Azure. Prevents non-medical text from being sent to AI or saved.
+
+const MEDICAL_PATTERNS = {
+  symptoms: [
+    // English symptoms
+    "pain",
+    "ache",
+    "aches",
+    "fever",
+    "headache",
+    "cough",
+    "vomit",
+    "vomiting",
+    "nausea",
+    "dizzy",
+    "dizziness",
+    "breathing",
+    "shortness of breath",
+    "blood",
+    "infection",
+    "symptom",
+    "symptoms",
+    "sick",
+    "fatigue",
+    "diarrhea",
+    "asthma",
+    "pressure",
+    "rash",
+    "swelling",
+    "burning",
+    "allergy",
+    "allergies",
+    "allergic",
+    "migraine",
+    "weakness",
+    "numbness",
+    "fainting",
+    "seizure",
+    "chills",
+    "sore throat",
+    "sore",
+    "cramps",
+    "stomachache",
+
+    // Spanish symptoms
+    "dolor",
+    "fiebre",
+    "tos",
+    "vomito",
+    "vómito",
+    "vomitando",
+    "nausea",
+    "náusea",
+    "mareo",
+    "mareos",
+    "respirar",
+    "respiracion",
+    "respiración",
+    "sangre",
+    "infeccion",
+    "infección",
+    "sintoma",
+    "síntoma",
+    "sintomas",
+    "síntomas",
+    "enfermo",
+    "cansancio",
+    "diarrea",
+    "asma",
+    "presion",
+    "presión",
+    "roncha",
+    "hinchazon",
+    "hinchazón",
+    "alergia",
+    "alergias",
+    "garganta",
+    "estomago",
+    "estómago",
+    "migraña",
+    "migrana",
+    "debilidad",
+    "desmayo",
+    "convulsion",
+    "convulsión",
+    "escalofrios",
+    "escalofríos",
+  ],
+
+  injuries: [
+    // English injuries
+    "cut",
+    "bleed",
+    "bleeding",
+    "bled",
+    "bledding",
+    "bleading",
+    "wound",
+    "injury",
+    "injured",
+    "burn",
+    "burned",
+    "bruise",
+    "bruised",
+    "fracture",
+    "broken",
+    "sprain",
+    "sprained",
+    "twisted",
+    "hit",
+    "fell",
+    "fall",
+    "scratch",
+    "scratched",
+
+    // Spanish injuries
+    "corte",
+    "cortada",
+    "sangrando",
+    "sangro",
+    "sangró",
+    "herida",
+    "lesion",
+    "lesión",
+    "lesionado",
+    "quemadura",
+    "quemado",
+    "moreton",
+    "moretón",
+    "fractura",
+    "quebrado",
+    "torcedura",
+    "torcido",
+    "golpe",
+    "golpeado",
+    "caida",
+    "caída",
+    "raspon",
+    "raspón",
+  ],
+
+  bodyParts: [
+    // English
+    "head",
+    "eye",
+    "ear",
+    "nose",
+    "mouth",
+    "throat",
+    "neck",
+    "chest",
+    "heart",
+    "back",
+    "stomach",
+    "abdomen",
+    "arm",
+    "hand",
+    "finger",
+    "thumb",
+    "leg",
+    "knee",
+    "foot",
+    "toe",
+    "skin",
+    "face",
+    "shoulder",
+    "wrist",
+    "ankle",
+
+    // Spanish
+    "cabeza",
+    "ojo",
+    "oreja",
+    "nariz",
+    "boca",
+    "garganta",
+    "cuello",
+    "pecho",
+    "corazon",
+    "corazón",
+    "espalda",
+    "estomago",
+    "estómago",
+    "abdomen",
+    "brazo",
+    "mano",
+    "dedo",
+    "pierna",
+    "rodilla",
+    "pie",
+    "piel",
+    "cara",
+    "hombro",
+    "muneca",
+    "muñeca",
+    "tobillo",
+  ],
+
+  nonMedical: [
+    "work tomorrow",
+    "trabajar manana",
+    "trabajar mañana",
+    "homework",
+    "meeting",
+    "movie",
+    "game",
+    "restaurant",
+    "weather",
+    "school project",
+    "my boss",
+    "mi jefe",
+    "tomorrow at work",
+    "go to work",
+    "going to work",
+  ],
+};
+
+function stripAccents(text = "") {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function escapeRegExp(value = "") {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function termMatches(cleanText, rawTerm) {
+  const cleanTerm = stripAccents(String(rawTerm || "").toLowerCase().trim());
+
+  if (!cleanTerm) return false;
+
+  if (cleanTerm.includes(" ")) {
+    return cleanText.includes(cleanTerm);
+  }
+
+  const re = new RegExp(`\\b${escapeRegExp(cleanTerm)}\\b`, "i");
+  return re.test(cleanText);
+}
+
+function countMatches(cleanText, terms) {
+  return terms.reduce((count, term) => {
+    return termMatches(cleanText, term) ? count + 1 : count;
+  }, 0);
+}
+
+function classifyMedicalIntent(text = "") {
+  const clean = stripAccents(text.toLowerCase().trim());
+
+  if (clean.length < 4) {
+    return {
+      isMedical: false,
+      confidence: 0,
+      reason: "Text too short",
+      score: 0,
+    };
+  }
+
+  const symptomMatches = countMatches(clean, MEDICAL_PATTERNS.symptoms);
+  const injuryMatches = countMatches(clean, MEDICAL_PATTERNS.injuries);
+  const bodyPartMatches = countMatches(clean, MEDICAL_PATTERNS.bodyParts);
+  const nonMedicalMatches = countMatches(clean, MEDICAL_PATTERNS.nonMedical);
+
+  let score = 0;
+  const reasons = [];
+
+  if (symptomMatches > 0) {
+    score += symptomMatches * 3;
+    reasons.push("symptom detected");
+  }
+
+  if (injuryMatches > 0) {
+    score += injuryMatches * 3;
+    reasons.push("injury detected");
+  }
+
+  if (bodyPartMatches > 0) {
+    score += bodyPartMatches * 2;
+    reasons.push("body part detected");
+  }
+
+  if (injuryMatches > 0 && bodyPartMatches > 0) {
+    score += 4;
+    reasons.push("injury + body part detected");
+  }
+
+  if (symptomMatches > 0 && bodyPartMatches > 0) {
+    score += 3;
+    reasons.push("symptom + body part detected");
+  }
+
+  if (nonMedicalMatches > 0) {
+    score -= nonMedicalMatches * 4;
+    reasons.push("non-medical context detected");
+  }
+
+  const emergencyPattern =
+    /\b(chest pain|chest pressure|shortness of breath|cannot breathe|can't breathe|difficulty breathing|heavy bleeding|severe pain|cut my|cut his|cut her|broken|fracture|burned|dolor en el pecho|no puedo respirar|no puede respirar|sangrado fuerte|dolor fuerte)\b/i;
+
+  if (emergencyPattern.test(clean)) {
+    score += 8;
+    reasons.push("emergency or injury phrase detected");
+  }
+
+  const isMedical = score >= 3;
+
+  return {
+    isMedical,
+    confidence: Math.min(Math.max(score / 10, 0), 1),
+    reason:
+      reasons.length > 0
+        ? reasons.join(", ")
+        : "No medical pattern detected",
+    score,
+  };
+}
+
+function invalidMedicalInputResponse(intent) {
+  return {
+    success: false,
+    medical: false,
+    color: null,
+    mensaje:
+      "Please enter a valid medical symptom or injury. MediFlow AI is intended for healthcare-related symptom evaluation only.",
+    reasons: [
+      "The provided text does not appear to describe a medical symptom or injury.",
+      `Validation reason: ${intent?.reason || "No medical pattern detected"}`,
+    ],
+    red_flags_detected: [],
+    appointment_eligible: false,
+    appointment_priority: "BLOCKED",
+    should_save: false,
+  };
+}
+
 // ---- PROMPT ----
 const SYSTEM_PROMPT = `
 You are MediFlow AI, an administrative triage assistant.
@@ -102,21 +438,37 @@ function normalizeColor(color) {
   return "YELLOW";
 }
 
+function getAppointmentPriority(color) {
+  if (color === "GREEN") return "ROUTINE";
+  if (color === "YELLOW") return "PRIORITY";
+  return "BLOCKED";
+}
+
 function fallbackYellow(msg) {
   return {
+    success: false,
+    medical: true,
     color: "YELLOW",
     mensaje: msg,
     reasons: ["Fallback triggered"],
     red_flags_detected: [],
+    appointment_eligible: true,
+    appointment_priority: "PRIORITY",
+    should_save: false,
   };
 }
 
 function immediateRedResponse(keys) {
   return {
+    success: true,
+    medical: true,
     color: "RED",
     mensaje: "Emergency warning signs detected. Seek immediate care.",
     reasons: [`Detected: ${keys.join(", ")}`],
     red_flags_detected: keys,
+    appointment_eligible: false,
+    appointment_priority: "BLOCKED",
+    should_save: true,
   };
 }
 
@@ -152,7 +504,17 @@ export async function POST(req) {
 
     if (!sintomas) {
       return NextResponse.json(
-        fallbackYellow("Please enter symptoms."),
+        {
+          success: false,
+          medical: false,
+          color: null,
+          mensaje: "Please enter symptoms before submitting.",
+          reasons: ["No symptom text was provided."],
+          red_flags_detected: [],
+          appointment_eligible: false,
+          appointment_priority: "BLOCKED",
+          should_save: false,
+        },
         { status: 400 }
       );
     }
@@ -160,6 +522,20 @@ export async function POST(req) {
     const sintomasLimited = sintomas.slice(0, 1200);
 
     console.log("INPUT:", sintomasLimited);
+
+    // ✅ Local medical intent validation before Azure and before Supabase
+    const medicalIntent = classifyMedicalIntent(sintomasLimited);
+
+    console.log("MEDICAL INTENT:", medicalIntent);
+
+    if (!medicalIntent.isMedical) {
+      console.log("NON MEDICAL INPUT - NOT SAVED");
+
+      return NextResponse.json(
+        invalidMedicalInputResponse(medicalIntent),
+        { status: 400 }
+      );
+    }
 
     // 🔴 RED FLAGS LOCAL CHECK
     const detected = [];
@@ -182,6 +558,7 @@ export async function POST(req) {
       if (insertError) {
         return NextResponse.json(
           {
+            success: false,
             error: "Database insert failed",
             details: insertError.message,
           },
@@ -250,13 +627,21 @@ export async function POST(req) {
     console.log("RAW parsed.reasons:", parsed.reasons);
     console.log("TYPE parsed.reasons:", typeof parsed.reasons);
 
+    const color = normalizeColor(parsed.color);
+    const appointmentPriority = getAppointmentPriority(color);
+
     const result = {
-      color: normalizeColor(parsed.color),
+      success: true,
+      medical: true,
+      color,
       mensaje:
         parsed.mensaje ||
         "Please monitor your symptoms and seek medical care if they worsen.",
       reasons: ensureArray(parsed.reasons),
       red_flags_detected: ensureArray(parsed.red_flags_detected),
+      appointment_eligible: color === "GREEN" || color === "YELLOW",
+      appointment_priority: appointmentPriority,
+      should_save: true,
     };
 
     const insertError = await saveTriageRecord({
@@ -268,6 +653,7 @@ export async function POST(req) {
     if (insertError) {
       return NextResponse.json(
         {
+          success: false,
           error: "Database insert failed",
           details: insertError.message,
         },
